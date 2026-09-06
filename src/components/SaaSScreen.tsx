@@ -16,7 +16,8 @@ import {
   Copy,
   Check,
   AlertCircle,
-  MessageCircle
+  MessageCircle,
+  Clock
 } from 'lucide-react';
 
 
@@ -94,6 +95,8 @@ export const SaaSScreen: FC<SaaSScreenProps> = ({ settings, onUpdateSettings }) 
     setTimeout(() => setIsSaved(false), 3000);
   };
 
+  const isTrial = settings?.subscriptionStatus === 'trial' || settings?.plan === 'trial';
+
   // طلب تجديد أو تفعيل الاشتراك عبر واتساب مطور المنصة
   const handleRequestRenewalWhatsApp = () => {
     const devPhone = '9647764271130';
@@ -101,17 +104,23 @@ export const SaaSScreen: FC<SaaSScreenProps> = ({ settings, onUpdateSettings }) 
     const expiryDateStr = settings?.expiresAt
       ? new Date(settings.expiresAt).toLocaleDateString('ar-IQ')
       : 'غير محدد';
+    const statusNote = isTrial
+      ? `(فترة تجريبية مجانية 7 أيام - متبقي ${daysRemaining} يوماً)`
+      : `(متبقي ${daysRemaining} يوماً)`;
+    const subject = isTrial
+      ? 'تثبيت وتفعيل اشتراك منظومة المولدات بعد التجربة'
+      : 'تجديد اشتراك منظومة المولدات الأهلية';
 
     const message = `السلام عليكم ورحمة الله،
-أود تجديد اشتراك منظومة المولدات الأهلية:
+أود ${subject}:
 📌 اسم المولدة: ${generatorName}
 👤 اسم صاحب المولدة: ${ownerName}
 📞 رقم الهاتف المسجل: ${phone}
 📍 المحافظة والمنطقة: ${address}
-⏳ تاريخ انتهاء الاشتراك الحالي: ${expiryDateStr} (متبقي ${daysRemaining} يوماً)
-⚡ نوع التجديد المطلوب: ${planStr}
+⏳ تاريخ انتهاء الصلاحية الحالي: ${expiryDateStr} ${statusNote}
+⚡ نوع الاشتراك المطلوب: ${planStr}
 
-يرجى تزويدي برقم محفظة زين كاش أو كي كارد لتسديد المبلغ وتفعيل التجديد. شكراً جزيلاً!`;
+يرجى تزويدي برقم محفظة زين كاش أو كي كارد لتسديد المبلغ وتفعيل الاشتراك. شكراً جزيلاً!`;
 
     window.open(`https://wa.me/${devPhone}?text=${encodeURIComponent(message)}`, '_blank');
   };
@@ -156,13 +165,20 @@ export const SaaSScreen: FC<SaaSScreenProps> = ({ settings, onUpdateSettings }) 
           </p>
         </div>
 
-        <div className="bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-2">
-          <CheckCircle2 className="w-4 h-4" />
-          <span>الاشتراك ساري: متبقي {daysRemaining} يوماً</span>
-        </div>
+        {isTrial ? (
+          <div className="bg-blue-500/15 border border-blue-500/30 text-blue-300 px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-2">
+            <Clock className="w-4 h-4 text-blue-400" />
+            <span>فترة تجريبية مجانية (7 أيام): متبقي {daysRemaining} يوماً</span>
+          </div>
+        ) : (
+          <div className="bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4" />
+            <span>الاشتراك ساري: متبقي {daysRemaining} يوماً</span>
+          </div>
+        )}
       </div>
 
-      {/* تنبيه انتهاء الاشتراك قبل 5 أيام */}
+      {/* تنبيه انتهاء الاشتراك أو التجربة قبل 5 أيام */}
       {daysRemaining <= 5 && (
         <div className="bg-gradient-to-r from-amber-950/80 to-slate-900 border-2 border-amber-500 rounded-2xl p-4 text-amber-300 flex items-start gap-3 shadow-xl animate-pulse">
           <div className="p-2 rounded-xl bg-amber-500/20 text-amber-400 flex-shrink-0">
@@ -170,10 +186,10 @@ export const SaaSScreen: FC<SaaSScreenProps> = ({ settings, onUpdateSettings }) 
           </div>
           <div className="flex-1">
             <h4 className="font-black text-sm text-white flex items-center gap-2">
-              <span>⚠️ تنبيه مهم جداً: ينتهي اشتراك منظومة المولدات بعد {daysRemaining} {daysRemaining === 1 ? 'يوم واحد' : 'أيام'}!</span>
+              <span>⚠️ تنبيه مهم جداً: {isTrial ? 'تنتهي الفترة التجريبية' : 'ينتهي اشتراك المنظومة'} بعد {daysRemaining} {daysRemaining === 1 ? 'يوم واحد' : 'أيام'}!</span>
             </h4>
             <p className="text-xs text-amber-200/90 mt-1 leading-relaxed">
-              تاريخ الانتهاء هو <strong>{settings?.expiresAt ? new Date(settings.expiresAt).toLocaleDateString('ar-IQ') : ''}</strong>. يرجى إرسال طلب التجديد للمطور لتفادي إيقاف المنظومة والمزامنة السحابية.
+              تاريخ الانتهاء هو <strong>{settings?.expiresAt ? new Date(settings.expiresAt).toLocaleDateString('ar-IQ') : ''}</strong>. يرجى إرسال طلب الاشتراك للمطور لتفادي إيقاف المنظومة والمزامنة السحابية.
             </p>
           </div>
         </div>

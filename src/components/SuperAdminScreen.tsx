@@ -34,7 +34,7 @@ export const SuperAdminScreen: FC<SuperAdminScreenProps> = ({
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCity, setSelectedCity] = useState('all');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'active' | 'expired' | 'blocked'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'trial' | 'pending' | 'active' | 'expired' | 'blocked'>('all');
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [refreshMsg, setRefreshMsg] = useState<string | null>(null);
 
@@ -77,8 +77,15 @@ export const SuperAdminScreen: FC<SuperAdminScreenProps> = ({
   const platformStats = useMemo(() => {
     const totalTenants = tenants.length;
     const pendingTenants = tenants.filter((t) => t.subscriptionStatus === 'pending_activation').length;
-    const activeTenants = tenants.filter((t) => !t.isBlocked && t.subscriptionStatus === 'active' && new Date(t.expiresAt) > new Date()).length;
-    const expiredTenants = tenants.filter((t) => t.subscriptionStatus !== 'pending_activation' && new Date(t.expiresAt) <= new Date()).length;
+    const trialTenants = tenants.filter(
+      (t) => !t.isBlocked && (t.subscriptionStatus === 'trial' || t.plan === 'trial') && new Date(t.expiresAt) > new Date()
+    ).length;
+    const activeTenants = tenants.filter(
+      (t) => !t.isBlocked && t.subscriptionStatus === 'active' && new Date(t.expiresAt) > new Date()
+    ).length;
+    const expiredTenants = tenants.filter(
+      (t) => t.subscriptionStatus !== 'pending_activation' && new Date(t.expiresAt) <= new Date()
+    ).length;
 
     // مجموع أرباح اشتراكات الـ SaaS من المولدات
     const totalSaasRevenue = tenants.reduce((sum, t) => sum + (t.planPrice || 0), 0);
@@ -88,6 +95,7 @@ export const SuperAdminScreen: FC<SuperAdminScreenProps> = ({
     return {
       totalTenants,
       pendingTenants,
+      trialTenants,
       activeTenants,
       expiredTenants,
       totalSaasRevenue,
@@ -109,12 +117,14 @@ export const SuperAdminScreen: FC<SuperAdminScreenProps> = ({
 
       const matchesCity = selectedCity === 'all' || t.address.includes(selectedCity);
 
-      const isExpired = t.subscriptionStatus !== 'pending_activation' && new Date(t.expiresAt) <= new Date();
       const isPending = t.subscriptionStatus === 'pending_activation';
+      const isExpired = !isPending && new Date(t.expiresAt) <= new Date();
+      const isTrial = !t.isBlocked && !isExpired && (t.subscriptionStatus === 'trial' || t.plan === 'trial');
 
       let matchesStatus = true;
       if (statusFilter === 'pending') matchesStatus = isPending;
-      if (statusFilter === 'active') matchesStatus = !t.isBlocked && !isPending && !isExpired;
+      if (statusFilter === 'trial') matchesStatus = isTrial;
+      if (statusFilter === 'active') matchesStatus = !t.isBlocked && !isPending && !isExpired && !isTrial;
       if (statusFilter === 'expired') matchesStatus = isExpired;
       if (statusFilter === 'blocked') matchesStatus = t.isBlocked;
 
@@ -426,6 +436,14 @@ export const SuperAdminScreen: FC<SuperAdminScreenProps> = ({
               الكل ({tenants.length})
             </button>
             <button
+              onClick={() => setStatusFilter('trial')}
+              className={`px-2.5 py-1.5 rounded-lg transition-all whitespace-nowrap ${
+                statusFilter === 'trial' ? 'bg-blue-600 text-white font-bold' : 'text-blue-400 font-bold'
+              }`}
+            >
+              فترة تجريبية ({platformStats.trialTenants})
+            </button>
+            <button
               onClick={() => setStatusFilter('pending')}
               className={`px-2.5 py-1.5 rounded-lg transition-all whitespace-nowrap ${
                 statusFilter === 'pending' ? 'bg-amber-500 text-slate-950 font-black' : 'text-amber-400 font-bold'
@@ -474,6 +492,7 @@ export const SuperAdminScreen: FC<SuperAdminScreenProps> = ({
           {filteredTenants.map((t) => {
             const isPending = t.subscriptionStatus === 'pending_activation';
             const isExpired = !isPending && new Date(t.expiresAt) <= new Date();
+            const isTrial = !isPending && !isExpired && (t.subscriptionStatus === 'trial' || t.plan === 'trial');
             const daysLeft = Math.ceil((new Date(t.expiresAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
             const subCount = allSubscribers.filter((s) => s.tenantId === t.id).length;
 
@@ -487,6 +506,8 @@ export const SuperAdminScreen: FC<SuperAdminScreenProps> = ({
                     ? 'border-amber-500/60 bg-amber-950/10 shadow-amber-500/5'
                     : isExpired
                     ? 'border-rose-600/50'
+                    : isTrial
+                    ? 'border-blue-500/50 bg-blue-950/10 shadow-blue-500/5'
                     : 'border-slate-800'
                 }`}
               >
@@ -506,6 +527,11 @@ export const SuperAdminScreen: FC<SuperAdminScreenProps> = ({
                             جديد / بانتظار التفعيل
                           </span>
                         )}
+                        {isTrial && (
+                          <span className="text-[10px] bg-blue-500/20 text-blue-300 border border-blue-500/40 px-2 py-0.5 rounded-full font-bold">
+                            🎁 تجريبي ({daysLeft} يوماً)
+                          </span>
+                        )}
                       </h4>
                       <p className="text-xs text-slate-300 mt-1">👤 المالك: <strong>{t.ownerName}</strong></p>
                       <p className="text-xs text-slate-300 font-mono">📞 {t.phone}</p>
@@ -514,7 +540,7 @@ export const SuperAdminScreen: FC<SuperAdminScreenProps> = ({
 
                     <div className="text-left">
                       <span className="text-[11px] font-bold bg-purple-500/10 text-purple-300 border border-purple-500/20 px-2 py-0.5 rounded-lg block">
-                        {t.plan === 'yearly' ? 'طلب سنوي' : 'طلب شهري'}
+                        {t.plan === 'yearly' ? 'طلب سنوي' : t.plan === 'monthly' ? 'طلب شهري' : 'فترة تجريبية 7 أيام'}
                       </span>
                       <span className="text-[10px] text-slate-400 block mt-1">
                         {subCount} مشترك مسجل
@@ -531,7 +557,11 @@ export const SuperAdminScreen: FC<SuperAdminScreenProps> = ({
                       </span>
                     ) : isExpired ? (
                       <span className="text-rose-400 font-bold flex items-center gap-1">
-                        <AlertCircle className="w-3.5 h-3.5" /> منتهي ({Math.abs(daysLeft)} يوم مضت)
+                        <AlertCircle className="w-3.5 h-3.5" /> {t.plan === 'trial' ? 'انتهت الـ 7 أيام التجريبية' : 'منتهي'} ({Math.abs(daysLeft)} يوم مضت)
+                      </span>
+                    ) : isTrial ? (
+                      <span className="text-blue-400 font-bold flex items-center gap-1">
+                        <Clock className="w-3.5 h-3.5" /> تجربة مجانية (متبقي {daysLeft} يوماً)
                       </span>
                     ) : (
                       <span className="text-emerald-400 font-bold flex items-center gap-1">

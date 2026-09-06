@@ -152,18 +152,21 @@ export const AuthScreen: FC<AuthScreenProps> = ({ onLoginSuccess }) => {
       const newTenantId = `tenant-${Date.now()}`;
       const newUserId = `user-${Date.now()}`;
 
-      // يتم إنشاء المولدة بحالة (بانتظار التفعيل اليدوي من صاحب المنصة)
+      // تفعيل فترة تجريبية مجانية لمدة 7 أيام عند التسجيل الجديد
+      const trialDays = 7;
+      const trialExpiresAt = new Date(Date.now() + trialDays * 24 * 60 * 60 * 1000).toISOString();
+
       const newTenant: TenantSettings = {
         id: newTenantId,
         generatorName: regGenName.trim(),
         ownerName: regOwnerName.trim() || regGenName.trim(),
         phone: phoneClean,
         address: `${regCity} - ${regAddress.trim() || 'العراق'}`,
-        plan: regPlan,
-        planPrice: regPlan === 'yearly' ? 150000 : 15000,
-        subscriptionStatus: 'pending_activation', // بانتظار تفعيل صاحب المنصة
+        plan: 'trial',
+        planPrice: 0,
+        subscriptionStatus: 'trial', // فترة تجريبية نشطة ومفتوحة لمدة 7 أيام
         isBlocked: false,
-        expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+        expiresAt: trialExpiresAt,
         autoSendWhatsapp: true,
         defaultPriceNormal: 12000,
         defaultPriceGold: 20000,
@@ -260,7 +263,7 @@ export const AuthScreen: FC<AuthScreenProps> = ({ onLoginSuccess }) => {
         {regSuccess && (
           <div className="mb-4 p-3.5 bg-emerald-950/70 border border-emerald-500/40 rounded-xl text-xs text-emerald-300 flex items-center gap-2">
             <CheckCircle2 className="w-5 h-5 text-emerald-400 flex-shrink-0" />
-            <span>تم تسجيل مولدتكم بنجاح! جاري الدخول وتجهيز المنظومة...</span>
+            <span>تم تسجيل مولدتكم وتفعيل الفترة التجريبية (7 أيام) بنجاح! جاري الدخول...</span>
           </div>
         )}
 
@@ -343,6 +346,17 @@ export const AuthScreen: FC<AuthScreenProps> = ({ onLoginSuccess }) => {
         {/* 2. نموذج تسجيل مولدة جديدة حقيقي */}
         {mode === 'register' && (
           <form onSubmit={handleRegister} className="space-y-3">
+            {/* إشعار الفترة التجريبية المجانية 7 أيام */}
+            <div className="bg-gradient-to-r from-emerald-950/80 to-slate-900 border border-emerald-500/40 rounded-2xl p-3 text-emerald-300 text-xs flex items-center gap-2.5 shadow-md">
+              <span className="text-xl">🎁</span>
+              <div>
+                <strong className="block text-emerald-400 font-bold">فترة تجريبية مجانية لمدة 7 أيام!</strong>
+                <span className="text-[11px] text-emerald-200/80">
+                  سجل الآن واستخدم المنظومة بكافة مميزاتها مجاناً. المطالبة بالاشتراك تبدأ بعد انتهاء الـ 7 أيام.
+                </span>
+              </div>
+            </div>
+
             <div>
               <label className="block text-xs font-bold text-slate-300 mb-1 flex items-center gap-1.5">
                 <Building className="w-3.5 h-3.5 text-amber-400" />
@@ -452,7 +466,7 @@ export const AuthScreen: FC<AuthScreenProps> = ({ onLoginSuccess }) => {
             {/* اختيار باقة الاشتراك المطلوبة */}
             <div className="pt-1">
               <label className="block text-xs font-bold text-slate-300 mb-1.5">
-                باقة اشتراك المنصة المطلوبة:
+                باقة الاشتراك المطلوبة (بعد انتهاء الـ 7 أيام التجريبية المجانية):
               </label>
               <div className="grid grid-cols-2 gap-2 text-xs">
                 <label
@@ -503,7 +517,7 @@ export const AuthScreen: FC<AuthScreenProps> = ({ onLoginSuccess }) => {
               className="w-full bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black py-3 rounded-xl text-sm transition-all shadow-lg shadow-amber-500/20 mt-2 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
             >
               <ShieldCheck className="w-4 h-4" />
-              <span>{isLoading ? 'جاري إنشاء الحساب بالسحابة...' : 'تسجيل المولدة والبدء'}</span>
+              <span>{isLoading ? 'جاري إنشاء الحساب وتفعيل التجربة...' : 'تسجيل المولدة وبدء التجربة المجانية (7 أيام)'}</span>
             </button>
           </form>
         )}

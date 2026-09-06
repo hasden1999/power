@@ -20,6 +20,7 @@ export const SubscriptionStatusScreen: FC<SubscriptionStatusScreenProps> = ({
 }) => {
   const [isChecking, setIsChecking] = useState(false);
   const [checkMsg, setCheckMsg] = useState<string | null>(null);
+  const [selectedPlan, setSelectedPlan] = useState<'monthly' | 'yearly'>('monthly');
 
   const isBlocked = tenant.isBlocked;
   const isPending = tenant.subscriptionStatus === 'pending_activation';
@@ -27,6 +28,7 @@ export const SubscriptionStatusScreen: FC<SubscriptionStatusScreenProps> = ({
     !isBlocked &&
     !isPending &&
     Boolean(tenant.expiresAt && new Date(tenant.expiresAt) <= new Date());
+  const isTrial = tenant.plan === 'trial' || tenant.subscriptionStatus === 'trial';
 
   const handleCheckStatus = async () => {
     try {
@@ -50,10 +52,12 @@ export const SubscriptionStatusScreen: FC<SubscriptionStatusScreenProps> = ({
     }
 
     let reasonText = 'تفعيل اشتراكي الجديد';
-    if (isExpired) reasonText = 'تجديد اشتراكي المنتهي';
+    if (isExpired) {
+      reasonText = isTrial ? 'الاشتراك بعد انتهاء الفترة التجريبية (7 أيام)' : 'تجديد اشتراكي المنتهي';
+    }
     if (isBlocked) reasonText = 'مراجعة سبب إيقاف الحساب';
 
-    const planType = tenant.plan === 'yearly' ? 'السنوي (150,000 د.ع - خصم شهرين)' : 'الشهري (15,000 د.ع)';
+    const planType = selectedPlan === 'yearly' ? 'السنوي (150,000 د.ع - خصم شهرين)' : 'الشهري (15,000 د.ع)';
 
     const message = `السلام عليكم ورحمة الله،
 أنا الأخ ${tenant.ownerName || user.fullName}، صاحب (${tenant.generatorName}).
@@ -84,6 +88,10 @@ export const SubscriptionStatusScreen: FC<SubscriptionStatusScreenProps> = ({
             <div className="w-16 h-16 rounded-2xl bg-amber-500/20 border border-amber-500/40 text-amber-400 flex items-center justify-center">
               <Clock className="w-9 h-9 animate-pulse" />
             </div>
+          ) : isTrial ? (
+            <div className="w-16 h-16 rounded-2xl bg-amber-500/20 border border-amber-500/40 text-amber-400 flex items-center justify-center">
+              <Clock className="w-9 h-9" />
+            </div>
           ) : (
             <div className="w-16 h-16 rounded-2xl bg-rose-500/20 border border-rose-500/40 text-rose-400 flex items-center justify-center">
               <ShieldAlert className="w-9 h-9" />
@@ -97,6 +105,8 @@ export const SubscriptionStatusScreen: FC<SubscriptionStatusScreenProps> = ({
             ? 'تم إيقاف هذا الحساب مؤقتاً'
             : isPending
             ? 'حسابكم بانتظار التفعيل اليدوي ⏳'
+            : isTrial
+            ? 'انتهت الفترة التجريبية المجانية (7 أيام) ⚠️'
             : 'انتهت فترة اشتراك المنظومة ⚠️'}
         </h2>
 
@@ -109,6 +119,10 @@ export const SubscriptionStatusScreen: FC<SubscriptionStatusScreenProps> = ({
             <span>
               أهلاً بك أخي <strong className="text-amber-400">{tenant.ownerName}</strong>! تم تسجيل بيانات مولدة <strong className="text-amber-400">{tenant.generatorName}</strong> بنجاح. يتم تفعيل الحساب يدوياً من قبل صاحب المنصة بعد سداد الاشتراك.
             </span>
+          ) : isTrial ? (
+            <span>
+              أهلاً بك أخي <strong className="text-amber-400">{tenant.ownerName}</strong>! لقد انتهت الفترة التجريبية المجانية (7 أيام) الخاصة بمولدة <strong className="text-amber-400">{tenant.generatorName}</strong>. للاستمرار في استخدام المنظومة والمزامنة السحابية وإصدار السندات، يرجى اختيار الباقة والاشتراك الآن.
+            </span>
           ) : (
             <span>
               نود إعلامكم بأن اشتراك مولدة <strong className="text-amber-400">{tenant.generatorName}</strong> قد انتهى. يرجى تجديد الاشتراك لمواصلة عمليات الجباية والمزامنة السحابية وحفظ الوصولات.
@@ -116,21 +130,54 @@ export const SubscriptionStatusScreen: FC<SubscriptionStatusScreenProps> = ({
           )}
         </p>
 
-        {/* بطاقة الأسعار وطرق الدفع */}
+        {/* بطاقة الأسعار واختيار الباقة */}
         <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 mb-6 text-right">
           <h4 className="text-xs font-bold text-amber-400 mb-2.5 flex items-center gap-1.5">
             <span className="inline-block w-2 h-2 rounded-full bg-amber-400"></span>
-            باقات اشتراك المنظومة المعتمدة:
+            اختر باقة الاشتراك المناسبة:
           </h4>
           <div className="grid grid-cols-2 gap-2 text-xs">
-            <div className="bg-slate-900 p-2.5 rounded-xl border border-slate-800">
-              <span className="text-slate-400 block text-[11px]">الاشتراك الشهري</span>
-              <strong className="text-white text-sm">15,000 د.ع</strong>
+            <div
+              onClick={() => setSelectedPlan('monthly')}
+              className={`p-2.5 rounded-xl border cursor-pointer transition-all ${
+                selectedPlan === 'monthly'
+                  ? 'bg-amber-500/15 border-amber-500 text-white'
+                  : 'bg-slate-900 border-slate-800 text-slate-400'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <span className="block text-[11px] font-bold">الاشتراك الشهري</span>
+                <input
+                  type="radio"
+                  name="sub_plan"
+                  checked={selectedPlan === 'monthly'}
+                  onChange={() => setSelectedPlan('monthly')}
+                  className="accent-amber-500"
+                />
+              </div>
+              <strong className="text-white text-sm block mt-1">15,000 د.ع</strong>
               <span className="text-[10px] text-emerald-400 block mt-0.5">صلاحية 30 يوماً</span>
             </div>
-            <div className="bg-slate-900 p-2.5 rounded-xl border border-amber-500/30">
-              <span className="text-amber-400 block text-[11px] font-bold">الاشتراك السنوي (خصم شهرين)</span>
-              <strong className="text-white text-sm">150,000 د.ع</strong>
+
+            <div
+              onClick={() => setSelectedPlan('yearly')}
+              className={`p-2.5 rounded-xl border cursor-pointer transition-all relative overflow-hidden ${
+                selectedPlan === 'yearly'
+                  ? 'bg-amber-500/15 border-amber-500 text-white'
+                  : 'bg-slate-900 border-slate-800 text-slate-400'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <span className="block text-[11px] font-bold text-amber-400">سنوي (خصم شهرين)</span>
+                <input
+                  type="radio"
+                  name="sub_plan"
+                  checked={selectedPlan === 'yearly'}
+                  onChange={() => setSelectedPlan('yearly')}
+                  className="accent-amber-500"
+                />
+              </div>
+              <strong className="text-white text-sm block mt-1">150,000 د.ع</strong>
               <span className="text-[10px] text-emerald-400 block mt-0.5">توفير 30,000 د.ع</span>
             </div>
           </div>
@@ -148,7 +195,7 @@ export const SubscriptionStatusScreen: FC<SubscriptionStatusScreenProps> = ({
             className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-black py-3 px-4 rounded-2xl text-sm transition-all shadow-lg shadow-emerald-600/20 cursor-pointer"
           >
             <MessageCircle className="w-5 h-5 fill-white" />
-            <span>تواصل مع المطور عبر واتساب (07764271130) للتفعيل</span>
+            <span>طلب الاشتراك ({selectedPlan === 'yearly' ? 'السنوي 150,000 د.ع' : 'الشهري 15,000 د.ع'}) عبر واتساب</span>
           </button>
 
           <button

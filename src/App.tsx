@@ -156,29 +156,55 @@ export function App() {
         onOpenInstall={() => setIsInstallOpen(true)}
       />
 
-      {/* تنبيه تحذيري يظهر لصاحب المولدة قبل 5 أيام من انتهاء الاشتراك */}
+      {/* شريط تنبيه: إما فترة تجريبية مجانية (7 أيام) أو تنبيه قبل 5 أيام من انتهاء الاشتراك */}
       {!impersonatedTenant &&
         activeSettings?.expiresAt &&
-        activeSettings.subscriptionStatus === 'active' &&
-        Math.ceil((new Date(activeSettings.expiresAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24)) <= 5 &&
-        Math.ceil((new Date(activeSettings.expiresAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24)) > 0 && (
-          <div className="bg-gradient-to-r from-amber-500 via-amber-600 to-amber-500 text-slate-950 px-4 py-2.5 shadow-lg border-b border-amber-400 flex flex-col sm:flex-row items-center justify-between gap-2 z-30">
-            <div className="flex items-center gap-2 text-xs sm:text-sm font-black">
-              <span className="inline-block w-2.5 h-2.5 rounded-full bg-red-600 animate-ping"></span>
-              <span>
-                ⚠️ تنبيه تجديد الاشتراك: ينتهي اشتراك مولدتكم بعد{' '}
-                {Math.ceil((new Date(activeSettings.expiresAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24))}{' '}
-                أيام (بتاريخ {new Date(activeSettings.expiresAt).toLocaleDateString('ar-IQ')}). يرجى طلب التجديد عبر واتساب المطور.
-              </span>
-            </div>
-            <button
-              onClick={() => setCurrentTab('saas')}
-              className="bg-slate-950 hover:bg-slate-900 text-amber-400 border border-amber-400/40 px-3.5 py-1 rounded-xl text-xs font-black transition-all cursor-pointer flex-shrink-0 shadow"
-            >
-              طلب التجديد الآن (واتساب)
-            </button>
-          </div>
-        )}
+        (() => {
+          const daysLeft = Math.ceil((new Date(activeSettings.expiresAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+          const isTrial = activeSettings.subscriptionStatus === 'trial' || activeSettings.plan === 'trial';
+
+          if (daysLeft <= 0) return null;
+
+          if (isTrial) {
+            return (
+              <div className="bg-gradient-to-r from-blue-700 via-indigo-600 to-blue-700 text-white px-4 py-2.5 shadow-lg border-b border-blue-400/40 flex flex-col sm:flex-row items-center justify-between gap-2 z-30">
+                <div className="flex items-center gap-2 text-xs sm:text-sm font-black">
+                  <span className="inline-block w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                  <span>
+                    🎁 أنت الآن في الفترة التجريبية المجانية: متبقي {daysLeft} {daysLeft === 1 ? 'يوم' : 'أيام'} (ينتهي العرض بتاريخ {new Date(activeSettings.expiresAt).toLocaleDateString('ar-IQ')}).
+                  </span>
+                </div>
+                <button
+                  onClick={() => setCurrentTab('saas')}
+                  className="bg-slate-950 hover:bg-slate-900 text-amber-400 border border-amber-400/40 px-3.5 py-1 rounded-xl text-xs font-black transition-all cursor-pointer flex-shrink-0 shadow"
+                >
+                  تثبيت الاشتراك الدائم
+                </button>
+              </div>
+            );
+          }
+
+          if (daysLeft <= 5 && activeSettings.subscriptionStatus === 'active') {
+            return (
+              <div className="bg-gradient-to-r from-amber-500 via-amber-600 to-amber-500 text-slate-950 px-4 py-2.5 shadow-lg border-b border-amber-400 flex flex-col sm:flex-row items-center justify-between gap-2 z-30">
+                <div className="flex items-center gap-2 text-xs sm:text-sm font-black">
+                  <span className="inline-block w-2.5 h-2.5 rounded-full bg-red-600 animate-ping"></span>
+                  <span>
+                    ⚠️ تنبيه تجديد الاشتراك: ينتهي اشتراك مولدتكم بعد {daysLeft} أيام (بتاريخ {new Date(activeSettings.expiresAt).toLocaleDateString('ar-IQ')}). يرجى طلب التجديد عبر واتساب المطور.
+                  </span>
+                </div>
+                <button
+                  onClick={() => setCurrentTab('saas')}
+                  className="bg-slate-950 hover:bg-slate-900 text-amber-400 border border-amber-400/40 px-3.5 py-1 rounded-xl text-xs font-black transition-all cursor-pointer flex-shrink-0 shadow"
+                >
+                  طلب التجديد الآن (واتساب)
+                </button>
+              </div>
+            );
+          }
+
+          return null;
+        })()}
 
       {/* نافذة تثبيت التطبيق وتجهيز قاعدة البيانات المحلية */}
       <InstallModal
