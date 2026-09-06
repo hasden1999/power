@@ -54,6 +54,21 @@ export async function seedInitialData() {
   await db.users.put(superAdminUser);
   await db.users.where('username').equals('admin').delete();
 
+  // تحويل أي مولدة محلية معلقة تلقائياً إلى فترة تجريبية 7 أيام
+  try {
+    const pendingSettings = await db.settings.where('subscriptionStatus').equals('pending_activation').toArray();
+    for (const s of pendingSettings) {
+      const trialExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+      await db.settings.update(s.id, {
+        subscriptionStatus: 'trial',
+        plan: 'trial',
+        expiresAt: trialExpiresAt,
+      });
+    }
+  } catch {
+    // تجاهل أي خطأ
+  }
+
   if (navigator.onLine) {
     try {
       await supabase.from('users').upsert({

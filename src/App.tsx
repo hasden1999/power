@@ -11,6 +11,7 @@ import { AuthScreen } from './components/AuthScreen';
 import { SuperAdminScreen } from './components/SuperAdminScreen';
 import { InstallModal } from './components/InstallModal';
 import { SubscriptionStatusScreen } from './components/SubscriptionStatusScreen';
+import { supabase } from './services/supabaseClient';
 import type { TenantSettings, UserAccount } from './types';
 
 export function App() {
@@ -44,7 +45,41 @@ export function App() {
         if (user) {
           setCurrentUser(user);
           if (user.tenantId) {
-            const tenant = await db.settings.get(user.tenantId);
+            let tenant = await db.settings.get(user.tenantId);
+
+            // جلب أحدث بيانات المولدة وحالة الاشتراك من السحابة إذا كان أونلاين
+            if (navigator.onLine) {
+              try {
+                const { data: cloudTenant } = await supabase
+                  .from('tenants')
+                  .select('*')
+                  .eq('id', user.tenantId)
+                  .maybeSingle();
+
+                if (cloudTenant) {
+                  tenant = {
+                    id: cloudTenant.id,
+                    generatorName: cloudTenant.generator_name,
+                    ownerName: cloudTenant.owner_name,
+                    phone: cloudTenant.phone || '',
+                    address: cloudTenant.address || '',
+                    plan: cloudTenant.plan || 'trial',
+                    planPrice: Number(cloudTenant.plan_price) || 0,
+                    subscriptionStatus: cloudTenant.subscription_status || 'trial',
+                    isBlocked: Boolean(cloudTenant.is_blocked),
+                    expiresAt: cloudTenant.expires_at,
+                    autoSendWhatsapp: Boolean(cloudTenant.auto_send_whatsapp),
+                    defaultPriceNormal: Number(cloudTenant.default_price_normal) || 0,
+                    defaultPriceGold: Number(cloudTenant.default_price_gold) || 0,
+                    createdAt: cloudTenant.created_at,
+                  };
+                  await db.settings.put(tenant);
+                }
+              } catch {
+                // تجاهل خطأ الاتصال
+              }
+            }
+
             if (tenant) setCurrentTenant(tenant);
           }
         }
@@ -108,9 +143,43 @@ export function App() {
     );
   }
 
-  // 3. التحقق من صلاحية اشتراك المولدة (إذا كان معلقاً، أو منتهياً، أو محظوراً)
+  // 3. التحقق من صلاحية اشتراك المولدة (إذا كان منتهياً بعد 7 أيام أو محظوراً)
   const refreshTenantData = async () => {
     if (currentUser?.tenantId) {
+      if (navigator.onLine) {
+        try {
+          const { data: cloudTenant } = await supabase
+            .from('tenants')
+            .select('*')
+            .eq('id', currentUser.tenantId)
+            .maybeSingle();
+
+          if (cloudTenant) {
+            const appTenant: TenantSettings = {
+              id: cloudTenant.id,
+              generatorName: cloudTenant.generator_name,
+              ownerName: cloudTenant.owner_name,
+              phone: cloudTenant.phone || '',
+              address: cloudTenant.address || '',
+              plan: cloudTenant.plan || 'trial',
+              planPrice: Number(cloudTenant.plan_price) || 0,
+              subscriptionStatus: cloudTenant.subscription_status || 'trial',
+              isBlocked: Boolean(cloudTenant.is_blocked),
+              expiresAt: cloudTenant.expires_at,
+              autoSendWhatsapp: Boolean(cloudTenant.auto_send_whatsapp),
+              defaultPriceNormal: Number(cloudTenant.default_price_normal) || 0,
+              defaultPriceGold: Number(cloudTenant.default_price_gold) || 0,
+              createdAt: cloudTenant.created_at,
+            };
+            await db.settings.put(appTenant);
+            setCurrentTenant(appTenant);
+            return;
+          }
+        } catch {
+          // تجاهل أي خطأ عابر
+        }
+      }
+
       const updated = await db.settings.get(currentUser.tenantId);
       if (updated) {
         setCurrentTenant(updated);
@@ -119,12 +188,12 @@ export function App() {
   };
 
   const isBlocked = Boolean(activeSettings?.isBlocked);
-  const isPending = activeSettings?.subscriptionStatus === 'pending_activation';
   const isExpired = Boolean(
     activeSettings?.expiresAt && new Date(activeSettings.expiresAt) <= new Date()
   );
 
-  const isLocked = !impersonatedTenant && (isBlocked || isPending || isExpired);
+  // القفل يتم فقط إذا كان الحساب محظوراً من قبل صاحب المنصة، أو إذا انتهت فترة الـ 7 أيام التجريبية / فترة الاشتراك
+  const isLocked = !impersonatedTenant && (isBlocked || isExpired);
 
   if (isLocked && activeSettings && currentUser.role !== 'super_admin') {
     return (
