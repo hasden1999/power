@@ -9,6 +9,7 @@ import { PricingScreen } from './components/PricingScreen';
 import { SaaSScreen } from './components/SaaSScreen';
 import { AuthScreen } from './components/AuthScreen';
 import { SuperAdminScreen } from './components/SuperAdminScreen';
+import { InstallModal } from './components/InstallModal';
 import type { TenantSettings, UserAccount } from './types';
 
 export function App() {
@@ -20,6 +21,7 @@ export function App() {
 
   const [currentTab, setCurrentTab] = useState<'collection' | 'subscribers' | 'pricing' | 'saas'>('collection');
   const [isInitialized, setIsInitialized] = useState(false);
+  const [isInstallOpen, setIsInstallOpen] = useState(false);
 
   // جلب إعدادات المولدة الحالية المسجل الدخول بها
   const activeTenantId = impersonatedTenant?.id || currentTenant?.id || '';
@@ -121,6 +123,15 @@ export function App() {
         onLogout={handleLogout}
         onBackToAdmin={currentUser.role === 'super_admin' ? handleBackToAdmin : undefined}
         isImpersonating={Boolean(impersonatedTenant)}
+        onOpenInstall={() => setIsInstallOpen(true)}
+      />
+
+      {/* نافذة تثبيت التطبيق وتجهيز قاعدة البيانات المحلية */}
+      <InstallModal
+        tenantId={tenantId}
+        generatorName={activeSettings?.generatorName}
+        isOpen={isInstallOpen ? true : undefined}
+        onClose={() => setIsInstallOpen(false)}
       />
 
       {/* المحتوى الرئيسي للمولدة */}

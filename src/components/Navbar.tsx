@@ -1,5 +1,5 @@
 import type { FC } from 'react';
-import { Zap, Wifi, WifiOff, RefreshCw, Users, DollarSign, Calendar, Settings, LogOut, ArrowRight } from 'lucide-react';
+import { Zap, Wifi, WifiOff, RefreshCw, Users, DollarSign, Calendar, Settings, LogOut, ArrowRight, Download } from 'lucide-react';
 
 
 import type { SyncStatusInfo } from '../services/syncService';
@@ -14,6 +14,7 @@ interface NavbarProps {
   onLogout: () => void;
   onBackToAdmin?: () => void;
   isImpersonating?: boolean;
+  onOpenInstall?: () => void;
 }
 
 export const Navbar: FC<NavbarProps> = ({
@@ -25,6 +26,7 @@ export const Navbar: FC<NavbarProps> = ({
   onLogout,
   onBackToAdmin,
   isImpersonating,
+  onOpenInstall,
 }) => {
   return (
     <header className="bg-slate-950/90 backdrop-blur-md border-b border-slate-800 sticky top-0 z-40">
@@ -125,7 +127,18 @@ export const Navbar: FC<NavbarProps> = ({
         </nav>
 
         {/* مؤشر الاتصال والمزامنة وقائمة المستخدم */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3">
+          {onOpenInstall && (
+            <button
+              onClick={onOpenInstall}
+              className="hidden sm:flex items-center gap-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer"
+              title="تثبيت التطبيق على الجهاز وتجهيز قاعدة البيانات المحلية"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>تثبيت كـ تطبيق</span>
+            </button>
+          )}
+
           <div className="hidden md:block">
             <SyncBadge syncInfo={syncInfo} />
           </div>

@@ -13,7 +13,7 @@ export default defineConfig({
 
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg'],
+      includeAssets: ['favicon.svg', 'icons.svg'],
       manifest: {
         name: 'نظام المولدات الأهلية - جباية وإدارة المشتركين',
         short_name: 'المولدة',
@@ -21,9 +21,25 @@ export default defineConfig({
         theme_color: '#0f172a',
         background_color: '#0f172a',
         display: 'standalone',
+        start_url: '/',
+        scope: '/',
         orientation: 'portrait',
         dir: 'rtl',
         lang: 'ar',
+        icons: [
+          {
+            src: '/favicon.svg',
+            sizes: '192x192 512x512',
+            type: 'image/svg+xml',
+            purpose: 'any maskable'
+          },
+          {
+            src: '/icons.svg',
+            sizes: '192x192 512x512',
+            type: 'image/svg+xml',
+            purpose: 'any'
+          }
+        ]
       },
     }),
   ],
