@@ -93,3 +93,19 @@ export interface TenantSettings {
   defaultPriceGold: number;
   createdAt: string;
 }
+
+export type ExpenseCategory = 'fuel' | 'oil_maintenance' | 'repairs' | 'salaries' | 'rent' | 'other';
+
+export interface Expense {
+  id: string; // UUID
+  tenantId: string;
+  category: ExpenseCategory;
+  title: string; // مثلاً: شراء كاز صهريج، تبديل دهن 20W50، تصليح دينمو، راتب الجابي
+  amount: number; // المبلغ بالدينار العراقي
+  liters?: number; // كمية لترات الكاز في حال كان وقود
+  date: string; // YYYY-MM-DD
+  notes?: string;
+  createdByName: string; // اسم مسجل المصروف
+  createdAt: string;
+}
+

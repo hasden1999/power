@@ -1,11 +1,11 @@
 import Dexie, { type Table } from 'dexie';
 import { supabase } from '../services/supabaseClient';
-import type { Subscriber, BillingCycle, Invoice, Payment, TenantSettings, UserAccount } from '../types';
+import type { Subscriber, BillingCycle, Invoice, Payment, TenantSettings, UserAccount, Expense } from '../types';
 
 export interface SyncQueueItem {
   id: string;
   action: 'insert' | 'update' | 'delete';
-  entity: 'subscribers' | 'payments' | 'invoices' | 'cycles';
+  entity: 'subscribers' | 'payments' | 'invoices' | 'cycles' | 'expenses';
   entityId: string;
   payload: any;
   createdAt: string;
@@ -20,18 +20,20 @@ export class GeneratorDatabase extends Dexie {
   payments!: Table<Payment, string>;
   settings!: Table<TenantSettings, string>;
   syncQueue!: Table<SyncQueueItem, string>;
+  expenses!: Table<Expense, string>;
 
   constructor() {
     super('AlMowalladaDB');
 
-    this.version(2).stores({
+    this.version(3).stores({
       users: 'id, username, role, tenantId',
       subscribers: 'id, tenantId, fullName, phone, street, breakerNumber, isActive, subscriptionType',
       billingCycles: 'id, tenantId, [month+year], isClosed',
       invoices: 'id, tenantId, cycleId, subscriberId, status, [subscriberId+cycleId]',
       payments: 'id, tenantId, subscriberId, invoiceId, syncStatus, paymentDate',
       settings: 'id, subscriptionStatus, isBlocked',
-      syncQueue: 'id, entity, entityId, createdAt'
+      syncQueue: 'id, entity, entityId, createdAt',
+      expenses: 'id, tenantId, category, date, createdAt'
     });
   }
 }

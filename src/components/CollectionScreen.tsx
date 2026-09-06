@@ -14,7 +14,10 @@ import {
   DollarSign,
   TrendingUp,
   CreditCard,
-  UserCheck
+  UserCheck,
+  Zap,
+  MessageSquare,
+  X
 } from 'lucide-react';
 
 interface CollectionScreenProps {
@@ -179,6 +182,72 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
     }
   };
 
+  // قبض كامل بلمسة واحدة (1-Click Full Payment ⚡)
+  const handleQuickFullPayment = async (sub: Subscriber) => {
+    const inv = invoiceMap.get(sub.id);
+    const due = inv ? Math.max(0, inv.totalDue - inv.totalPaid) : sub.openingBalance;
+    if (due <= 0) return;
+
+    try {
+      setIsSubmitting(true);
+      const currentTenantId = settings?.id || tenantId || 'tenant-01';
+
+      const payment = await recordPayment({
+        tenantId: currentTenantId,
+        subscriberId: sub.id,
+        invoiceId: inv?.id,
+        amount: due,
+        collectorName: collectorName || settings?.ownerName || 'الجابي الميداني',
+        notes: 'قبض كامل سريع ⚡',
+      });
+
+      onRefreshSync();
+
+      // فتح نافذة الوصل مباشرة
+      setLastPaymentReceipt({
+        subscriber: sub,
+        payment,
+        remaining: 0,
+      });
+    } catch (err) {
+      console.error('خطأ أثناء القبض السريع:', err);
+      alert('حدث خطأ أثناء حفظ السند السريع');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // إرسال تذكير بالدين عبر واتساب (WhatsApp Debt Reminder)
+  const handleSendDebtReminder = (sub: Subscriber) => {
+    const inv = invoiceMap.get(sub.id);
+    const due = inv ? Math.max(0, inv.totalDue - inv.totalPaid) : sub.openingBalance;
+    const currentAmount = inv ? inv.currentAmount : 0;
+    const prevDebt = inv ? inv.previousDebt : sub.openingBalance;
+    const generatorName = settings?.generatorName || 'المولدة الأهلية';
+    const paymentPhone = settings?.phone || '';
+
+    let cleanPhone = (sub.phone || '').replace(/[^0-9]/g, '');
+    if (cleanPhone.startsWith('07')) {
+      cleanPhone = '964' + cleanPhone.substring(1);
+    }
+
+    const message = `السلام عليكم أخي المشترك (${sub.fullName}) المحترم 🌹\n` +
+      `نود تذكيركم بوجود مستحقات اشتراك لدى: ${generatorName}\n` +
+      `⚡ عدد الأمبيرات: ${sub.amperes} أمبير (${sub.breakerNumber})\n` +
+      (currentAmount > 0 ? `📅 اشتراك الشهر الحالي: ${formatIQD(currentAmount)}\n` : '') +
+      (prevDebt > 0 ? `⏮️ ديون سابقة مرحلة: ${formatIQD(prevDebt)}\n` : '') +
+      `💰 إجمالي المطلوب بذمتكم: ${formatIQD(due)}\n\n` +
+      `يرجى التفضل بالسداد عند مرور الجابي أو التحويل عبر زين كاش / كي كارد على الرقم: ${paymentPhone || 'رقم إدارة المولدة'}.\n` +
+      `شاكرين حسن تعاونكم معنا.`;
+
+    const encoded = encodeURIComponent(message);
+    if (cleanPhone) {
+      window.open(`https://wa.me/${cleanPhone}?text=${encoded}`, '_blank');
+    } else {
+      window.open(`https://wa.me/?text=${encoded}`, '_blank');
+    }
+  };
+
   return (
     <div className="space-y-4 pb-12">
       
@@ -225,36 +294,37 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
       </div>
 
       {/* 2. شريط البحث السريع والفلترة بالأزقة (مخصص للعمل الميداني) */}
-      <div className="bg-slate-800/60 border border-slate-700/60 rounded-2xl p-3 sm:p-4 space-y-3">
+      <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3 sm:p-4 space-y-3 shadow-lg">
         
         <div className="flex flex-col sm:flex-row gap-2.5">
-          {/* حقل البحث بالاسم أو القاطع أو الهاتف */}
-          <div className="relative flex-1">
-            <Search className="absolute right-3.5 top-3.5 w-4 h-4 text-slate-400" />
+          {/* حقل البحث البارز بالاسم أو القاطع أو الهاتف */}
+          <div className="relative flex-1 flex items-center">
+            <Search className="absolute right-3.5 w-5 h-5 text-amber-400 pointer-events-none" />
             <input
               type="text"
-              placeholder="ابحث باسم المشترك، رقم القاطع (الفيز)، الهاتف، أو الزقاق..."
+              placeholder="🔍 ابحث باسم المشترك، رقم القاطع (الفيز)، الهاتف، أو الزقاق..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full bg-slate-900 border border-slate-700 rounded-xl pr-10 pl-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition-all"
+              className="w-full bg-slate-950 border border-slate-700 focus:border-amber-500 rounded-xl pr-11 pl-10 py-3 text-sm text-white placeholder-slate-400 focus:outline-none transition-all shadow-inner"
             />
             {searchTerm && (
               <button
                 onClick={() => setSearchTerm('')}
-                className="absolute left-3 top-3 text-xs text-slate-400 hover:text-white bg-slate-800 px-2 py-0.5 rounded"
+                className="absolute left-3 p-1 text-slate-400 hover:text-white bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                title="مسح البحث"
               >
-                مسح
+                <X className="w-4 h-4" />
               </button>
             )}
           </div>
 
-          {/* فلتر حالة التسديد */}
-          <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-xl border border-slate-700 overflow-x-auto">
+          {/* فلتر حالة التسديد بأزرار واضحة وسهلة اللمس */}
+          <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 overflow-x-auto no-scrollbar">
             <button
               onClick={() => setStatusFilter('all')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${
+              className={`px-3 py-2 rounded-lg text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
                 statusFilter === 'all'
-                  ? 'bg-amber-500 text-slate-950'
+                  ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
                   : 'text-slate-400 hover:text-white'
               }`}
             >
@@ -262,30 +332,30 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
             </button>
             <button
               onClick={() => setStatusFilter('unpaid')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${
+              className={`px-3 py-2 rounded-lg text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
                 statusFilter === 'unpaid'
-                  ? 'bg-rose-600 text-white'
-                  : 'text-slate-400 hover:text-white'
+                  ? 'bg-rose-500 text-slate-950 shadow-md shadow-rose-500/20'
+                  : 'text-slate-400 hover:text-rose-400'
               }`}
             >
               غير مسدد
             </button>
             <button
               onClick={() => setStatusFilter('partial')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${
+              className={`px-3 py-2 rounded-lg text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
                 statusFilter === 'partial'
-                  ? 'bg-amber-600 text-white'
-                  : 'text-slate-400 hover:text-white'
+                  ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
+                  : 'text-slate-400 hover:text-amber-400'
               }`}
             >
               جزئي
             </button>
             <button
               onClick={() => setStatusFilter('paid')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${
+              className={`px-3 py-2 rounded-lg text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
                 statusFilter === 'paid'
-                  ? 'bg-emerald-600 text-white'
-                  : 'text-slate-400 hover:text-white'
+                  ? 'bg-emerald-500 text-slate-950 shadow-md shadow-emerald-500/20'
+                  : 'text-slate-400 hover:text-emerald-400'
               }`}
             >
               خالص
@@ -425,24 +495,51 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
                     </div>
                   </div>
 
-                  {/* زر التحصيل السريع الفوري */}
-                  <div className="pt-1">
+                  {/* أزرار التحصيل الميداني السريع */}
+                  <div className="pt-1 space-y-1.5">
                     {isPaid ? (
                       <button
                         onClick={() => openPaymentModal(sub)}
-                        className="w-full flex items-center justify-center gap-2 bg-slate-700/50 hover:bg-slate-700 text-slate-300 font-semibold py-2 px-3 rounded-xl border border-slate-600/50 text-xs transition-colors cursor-pointer"
+                        className="w-full flex items-center justify-center gap-2 bg-slate-800/80 hover:bg-slate-700 text-slate-300 font-semibold py-2 px-3 rounded-xl border border-slate-700 text-xs transition-colors cursor-pointer"
                       >
                         <CreditCard className="w-3.5 h-3.5" />
                         قبض إضافي أو دفع مقدم
                       </button>
                     ) : (
-                      <button
-                        onClick={() => openPaymentModal(sub)}
-                        className="w-full flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black py-2.5 px-4 rounded-xl shadow-lg shadow-amber-500/20 text-sm transition-all transform active:scale-95 cursor-pointer"
-                      >
-                        <DollarSign className="w-4 h-4" />
-                        تسديد الآن ({formatIQD(remaining)})
-                      </button>
+                      <>
+                        {/* زر القبض الكامل الفوري بلمسة واحدة */}
+                        <button
+                          onClick={() => handleQuickFullPayment(sub)}
+                          disabled={isSubmitting}
+                          className="w-full flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-black py-2.5 px-3 rounded-xl shadow-lg shadow-amber-500/20 text-xs sm:text-sm transition-all cursor-pointer"
+                          title="قبض المبلغ المتبقي كاملاً فوراً"
+                        >
+                          <Zap className="w-4 h-4 fill-slate-950 stroke-[2.5]" />
+                          <span>⚡ قبض كامل ({formatIQD(remaining)})</span>
+                        </button>
+
+                        <div className="grid grid-cols-2 gap-1.5 text-xs">
+                          {/* زر تذكير واتساب بالدين */}
+                          <button
+                            onClick={() => handleSendDebtReminder(sub)}
+                            className="flex items-center justify-center gap-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-bold py-2 px-2 rounded-xl transition-all cursor-pointer"
+                            title="إرسال رسالة تذكير بالدين للمشترك عبر واتساب"
+                          >
+                            <MessageSquare className="w-3.5 h-3.5" />
+                            <span>تذكير واتساب</span>
+                          </button>
+
+                          {/* زر قبض جزئي أو مخصص */}
+                          <button
+                            onClick={() => openPaymentModal(sub)}
+                            className="flex items-center justify-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 font-bold py-2 px-2 rounded-xl transition-all cursor-pointer"
+                            title="دفع مبلغ جزئي أو مخصص"
+                          >
+                            <DollarSign className="w-3.5 h-3.5" />
+                            <span>دفع جزئي</span>
+                          </button>
+                        </div>
+                      </>
                     )}
                   </div>
 

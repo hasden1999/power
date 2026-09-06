@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { db } from '../db/db';
 import { supabase } from './supabaseClient';
-import type { Subscriber, BillingCycle, Invoice, Payment, TenantSettings, UserAccount } from '../types';
+import type { Subscriber, BillingCycle, Invoice, Payment, TenantSettings, UserAccount, Expense } from '../types';
 
 export interface SyncStatusInfo {
   isOnline: boolean;
@@ -218,6 +218,36 @@ function dbToPayment(r: any): Payment {
   };
 }
 
+function expenseToDb(e: Expense) {
+  return {
+    id: e.id,
+    tenant_id: e.tenantId,
+    category: e.category,
+    title: e.title,
+    amount: e.amount,
+    liters: e.liters != null ? e.liters : null,
+    date: e.date,
+    notes: e.notes || null,
+    created_by_name: e.createdByName || '',
+    created_at: e.createdAt,
+  };
+}
+
+function dbToExpense(r: any): Expense {
+  return {
+    id: r.id,
+    tenantId: r.tenant_id,
+    category: r.category,
+    title: r.title,
+    amount: Number(r.amount) || 0,
+    liters: r.liters != null ? Number(r.liters) : undefined,
+    date: r.date,
+    notes: r.notes || undefined,
+    createdByName: r.created_by_name || '',
+    createdAt: r.created_at,
+  };
+}
+
 // المزامنة الحقيقية الشاملة مع سحابة Supabase
 export async function syncAllWithCloud(activeTenantId?: string) {
   if (!navigator.onLine) return;
@@ -252,6 +282,15 @@ export async function syncAllWithCloud(activeTenantId?: string) {
     const localPayments = await db.payments.toArray();
     if (localPayments.length > 0) {
       await supabase.from('payments').upsert(localPayments.map(paymentToDb));
+    }
+
+    try {
+      const localExpenses = await db.expenses.toArray();
+      if (localExpenses.length > 0) {
+        await supabase.from('expenses').upsert(localExpenses.map(expenseToDb));
+      }
+    } catch (expErr) {
+      console.warn('تخطي رفع المصاريف للسحابة مؤقتاً:', expErr);
     }
 
     // تفريغ طابور المزامنة المعلقة بعد الرفع الناجح
@@ -308,6 +347,20 @@ export async function syncAllWithCloud(activeTenantId?: string) {
     const { data: cloudPayments } = await payQuery;
     if (cloudPayments && cloudPayments.length > 0) {
       await db.payments.bulkPut(cloudPayments.map(dbToPayment));
+    }
+
+    // سحب المصاريف
+    try {
+      let expQuery = supabase.from('expenses').select('*');
+      if (activeTenantId) {
+        expQuery = expQuery.eq('tenant_id', activeTenantId);
+      }
+      const { data: cloudExpenses } = await expQuery;
+      if (cloudExpenses && cloudExpenses.length > 0) {
+        await db.expenses.bulkPut(cloudExpenses.map(dbToExpense));
+      }
+    } catch (expErr) {
+      console.warn('تخطي سحب المصاريف من السحابة مؤقتاً:', expErr);
     }
 
     return true;

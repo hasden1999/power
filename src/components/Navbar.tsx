@@ -1,13 +1,13 @@
 import type { FC } from 'react';
-import { Zap, Wifi, WifiOff, RefreshCw, Users, DollarSign, Calendar, Settings, LogOut, ArrowRight, Download } from 'lucide-react';
+import { Zap, Wifi, WifiOff, RefreshCw, Users, DollarSign, Calendar, Settings, LogOut, ArrowRight, Download, TrendingDown } from 'lucide-react';
 
 
 import type { SyncStatusInfo } from '../services/syncService';
 import type { UserAccount } from '../types';
 
 interface NavbarProps {
-  currentTab: 'collection' | 'subscribers' | 'pricing' | 'saas';
-  setCurrentTab: (tab: 'collection' | 'subscribers' | 'pricing' | 'saas') => void;
+  currentTab: 'collection' | 'subscribers' | 'pricing' | 'expenses' | 'saas';
+  setCurrentTab: (tab: 'collection' | 'subscribers' | 'pricing' | 'expenses' | 'saas') => void;
   syncInfo: SyncStatusInfo;
   generatorName: string;
   currentUser: UserAccount;
@@ -111,6 +111,18 @@ export const Navbar: FC<NavbarProps> = ({
           >
             <Calendar className="w-4 h-4" />
             تسعيرة الشهر
+          </button>
+
+          <button
+            onClick={() => setCurrentTab('expenses')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition-all whitespace-nowrap ${
+              currentTab === 'expenses'
+                ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20 font-bold'
+                : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
+            }`}
+          >
+            <TrendingDown className="w-4 h-4" />
+            المصاريف والأرباح
           </button>
 
           <button

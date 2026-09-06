@@ -15,7 +15,12 @@ import {
   Phone,
   X,
   Save,
-  History
+  History,
+  FileSpreadsheet,
+  Download,
+  Upload,
+  CheckCircle2,
+  AlertCircle
 } from 'lucide-react';
 
 
@@ -33,6 +38,12 @@ export const SubscribersScreen: FC<SubscribersScreenProps> = ({ tenantId }) => {
 
   // حالة كشف حساب المشترك
   const [statementSub, setStatementSub] = useState<Subscriber | null>(null);
+
+  // حالة استيراد المشتركين من ملف Excel / CSV
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [parsedImportSubscribers, setParsedImportSubscribers] = useState<any[]>([]);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [isImporting, setIsImporting] = useState(false);
 
   // نموذج الحقول
   const [fullName, setFullName] = useState('');
@@ -190,15 +201,196 @@ export const SubscribersScreen: FC<SubscribersScreenProps> = ({ tenantId }) => {
     });
   };
 
+  // تصدير كشف المشتركين إلى ملف Excel / CSV متوافق 100% مع الحروف العربية
+  const handleExportCSV = () => {
+    if (subscribers.length === 0) {
+      alert('لا يوجد مشتركين لتصديرهم');
+      return;
+    }
+    const headers = [
+      'الاسم الكامل',
+      'رقم الهاتف',
+      'الشارع_الزقاق',
+      'رقم_القاطع',
+      'عدد_الأمبيرات',
+      'نوع_الاشتراك',
+      'السعر_المقطوع',
+      'ديون_سابقة',
+      'الحالة',
+      'ملاحظات',
+    ];
+    const rows = subscribers.map((s) => [
+      `"${s.fullName.replace(/"/g, '""')}"`,
+      `"${s.phone}"`,
+      `"${s.street.replace(/"/g, '""')}"`,
+      `"${s.breakerNumber}"`,
+      s.amperes,
+      `"${s.subscriptionType}"`,
+      s.fixedPrice || 0,
+      s.openingBalance || 0,
+      s.isActive ? 'نشط' : 'معطل',
+      `"${(s.notes || '').replace(/"/g, '""')}"`,
+    ]);
+
+    const csvContent = '\uFEFF' + [headers.join(','), ...rows.map((r) => r.join(','))].join('\r\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `مشتركين-المولدة-${new Date().toISOString().split('T')[0]}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  // تحميل نموذج إكسل فارغ جاهز للتعبئة
+  const handleDownloadTemplate = () => {
+    const headers = [
+      'الاسم الكامل',
+      'رقم الهاتف',
+      'الشارع_الزقاق',
+      'رقم_القاطع',
+      'عدد_الأمبيرات',
+      'نوع_الاشتراك',
+      'السعر_المقطوع',
+      'ديون_سابقة',
+      'ملاحظات',
+    ];
+    const sampleRows = [
+      ['أحمد جاسم محمد', '07701234567', 'شارع المنصور الرئيسي', 'B-101', '5', 'normal', '0', '0', 'ملاحظة تجريبية'],
+      ['حيدر سعدون العبيدي', '07801234567', 'فرع السوق / زقاق 4', 'B-102', '10', 'gold', '0', '15000', ''],
+      ['محمود علي الكعبي', '07501234567', 'شارع 14 رمضان', 'B-103', '4', 'normal', '0', '0', ''],
+    ];
+    const csvContent = '\uFEFF' + [headers.join(','), ...sampleRows.map((r) => r.map((c) => `"${c}"`).join(','))].join('\r\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'نموذج_إدخال_مشتركين_المولدة.csv';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  // قراءة وتحليل ملف CSV المرفوع
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImportError(null);
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const text = event.target?.result as string;
+        const cleanText = text.replace(/^\uFEFF/, '');
+        const lines = cleanText.split(/\r?\n/).filter((line) => line.trim().length > 0);
+        if (lines.length <= 1) {
+          setImportError('الملف فارغ أو لا يحتوي على بيانات بعد سطر العناوين');
+          return;
+        }
+
+        const parsed: any[] = [];
+        for (let i = 1; i < lines.length; i++) {
+          const row = lines[i];
+          const delimiter = row.includes('\t') ? '\t' : row.includes(';') ? ';' : ',';
+          const cols = row.split(delimiter).map((c) => c.trim().replace(/^"|"$/g, '').trim());
+          if (cols.length < 1 || !cols[0]) continue;
+
+          const fullName = cols[0];
+          const phone = cols[1] || '';
+          const street = cols[2] || 'شارع الرئيسي';
+          const breakerNumber = cols[3] || `Q-${i}`;
+          const amperes = parseFloat(cols[4]) || 4;
+          let subType: SubscriptionType = 'normal';
+          if (cols[5]?.includes('gold') || cols[5]?.includes('ذهب')) subType = 'gold';
+          else if (cols[5]?.includes('night') || cols[5]?.includes('مسائ')) subType = 'night';
+          else if (cols[5]?.includes('fixed') || cols[5]?.includes('مقطوع')) subType = 'fixed';
+          const fixedPrice = parseFloat(cols[6]) || undefined;
+          const openingBalance = parseFloat(cols[7]) || 0;
+          const notes = cols[8] || '';
+
+          parsed.push({
+            fullName,
+            phone,
+            street,
+            breakerNumber,
+            amperes,
+            subscriptionType: subType,
+            fixedPrice,
+            openingBalance,
+            notes,
+            isActive: true,
+          });
+        }
+
+        if (parsed.length === 0) {
+          setImportError('لم يتم العثور على أي صفوف صالحة. يرجى استخدام النموذج المعتمد.');
+          return;
+        }
+
+        setParsedImportSubscribers(parsed);
+      } catch (err: any) {
+        setImportError('حدث خطأ أثناء قراءة الملف: ' + (err.message || 'تنسيق غير مدعوم'));
+      }
+    };
+    reader.readAsText(file, 'utf-8');
+  };
+
+  // تأكيد إدراج المشتركين دفعة واحدة
+  const handleConfirmImport = async () => {
+    if (parsedImportSubscribers.length === 0) return;
+    setIsImporting(true);
+    try {
+      const now = new Date().toISOString();
+      for (const item of parsedImportSubscribers) {
+        const sub: Subscriber = {
+          id: `sub-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+          tenantId,
+          fullName: item.fullName,
+          phone: item.phone,
+          street: item.street,
+          breakerNumber: item.breakerNumber,
+          amperes: item.amperes,
+          subscriptionType: item.subscriptionType,
+          fixedPrice: item.fixedPrice,
+          openingBalance: item.openingBalance,
+          notes: item.notes,
+          isActive: true,
+          createdAt: now,
+          updatedAt: now,
+        };
+        await db.subscribers.add(sub);
+        await db.syncQueue.add({
+          id: `sync-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
+          action: 'insert',
+          entity: 'subscribers',
+          entityId: sub.id,
+          payload: sub,
+          createdAt: now,
+          attempts: 0,
+        });
+      }
+      setIsImportModalOpen(false);
+      setParsedImportSubscribers([]);
+      alert(`تم استيراد ${parsedImportSubscribers.length} مشترك بنجاح!`);
+    } catch (err) {
+      console.error('Import error:', err);
+      alert('حدث خطأ أثناء استيراد المشتركين');
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
   return (
     <div className="space-y-4 pb-12">
       
       {/* شريط الإجراءات العلوي */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-slate-800/80 border border-slate-700/60 rounded-2xl p-4 shadow-lg">
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-slate-900/80 border border-slate-800 rounded-2xl p-3 sm:p-4 shadow-lg">
         <div>
           <h2 className="text-lg font-bold text-white flex items-center gap-2">
             <span>سجل المشتركين والقواطع</span>
-            <span className="text-xs font-semibold bg-slate-700 text-amber-400 px-2 py-0.5 rounded-full">
+            <span className="text-xs font-semibold bg-slate-800 text-amber-400 px-2.5 py-0.5 rounded-full border border-slate-700">
               {subscribers.length} مشترك
             </span>
           </h2>
@@ -207,40 +399,79 @@ export const SubscribersScreen: FC<SubscribersScreenProps> = ({ tenantId }) => {
           </p>
         </div>
 
-        <button
-          onClick={handleOpenAdd}
-          className="flex items-center gap-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black py-2.5 px-4 rounded-xl shadow-lg shadow-amber-500/20 text-sm transition-all cursor-pointer"
-        >
-          <Plus className="w-4 h-4" />
-          إضافة مشترك جديد
-        </button>
+        {/* أزرار الإجراءات (إضافة، استيراد إكسل، تصدير) */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={handleExportCSV}
+            className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer border border-slate-700"
+            title="تصدير كشف المشتركين إلى ملف Excel"
+          >
+            <Download className="w-4 h-4 text-emerald-400" />
+            <span className="hidden sm:inline">تصدير إكسل</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setParsedImportSubscribers([]);
+              setImportError(null);
+              setIsImportModalOpen(true);
+            }}
+            className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer border border-slate-700"
+            title="استيراد مشتركين من ملف Excel / CSV"
+          >
+            <Upload className="w-4 h-4 text-blue-400" />
+            <span className="hidden sm:inline">استيراد إكسل</span>
+          </button>
+
+          <button
+            onClick={handleOpenAdd}
+            className="flex-1 sm:flex-initial flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black py-2.5 px-4 rounded-xl shadow-lg shadow-amber-500/20 text-xs sm:text-sm transition-all cursor-pointer active:scale-95"
+          >
+            <Plus className="w-4 h-4 stroke-[3]" />
+            <span>إضافة مشترك جديد</span>
+          </button>
+        </div>
       </div>
 
-      {/* شريط البحث والفلترة */}
-      <div className="bg-slate-800/60 border border-slate-700/60 rounded-2xl p-3 space-y-3">
-        <div className="flex flex-col sm:flex-row gap-2.5">
-          <div className="relative flex-1">
-            <Search className="absolute right-3.5 top-3.5 w-4 h-4 text-slate-400" />
-            <input
-              type="text"
-              placeholder="ابحث بالاسم، رقم القاطع، الهاتف، أو الشارع..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full bg-slate-900 border border-slate-700 rounded-xl pr-10 pl-4 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
-            />
-          </div>
+      {/* شريط البحث الميداني البارز والمخصص للهواتف المحمولة */}
+      <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3 space-y-2.5 shadow-md">
+        <div className="relative flex items-center">
+          <Search className="absolute right-3.5 w-5 h-5 text-amber-400 pointer-events-none" />
+          <input
+            type="text"
+            placeholder="🔍 ابحث بالاسم، رقم القاطع، الهاتف، أو الشارع..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full bg-slate-950 border border-slate-700/80 focus:border-amber-500 rounded-xl pr-11 pl-10 py-3 text-sm text-white placeholder-slate-400 focus:outline-none transition-all shadow-inner"
+          />
+          {searchTerm && (
+            <button
+              onClick={() => setSearchTerm('')}
+              className="absolute left-3 p-1 text-slate-400 hover:text-white bg-slate-800 rounded-lg transition-colors cursor-pointer"
+              title="مسح البحث"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+
+        {/* مؤشر عدد النتائج وأزرار الأزقة */}
+        <div className="flex items-center justify-between gap-2 text-xs text-slate-400 flex-wrap">
+          <span className="font-semibold text-slate-300">
+            عرض {filteredSubscribers.length} من أصل {subscribers.length} مشترك
+          </span>
 
           {streetsList.length > 0 && (
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs no-scrollbar">
               <button
                 onClick={() => setSelectedStreet('all')}
-                className={`px-3 py-1.5 rounded-xl transition-all whitespace-nowrap ${
+                className={`px-3 py-1.5 rounded-xl transition-all whitespace-nowrap cursor-pointer font-bold ${
                   selectedStreet === 'all'
-                    ? 'bg-amber-500 text-slate-950 font-bold'
-                    : 'bg-slate-900 text-slate-400 border border-slate-700'
+                    ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
+                    : 'bg-slate-950 text-slate-400 border border-slate-800 hover:text-white'
                 }`}
               >
-                كل الأزقة
+                كل الأزقة ({subscribers.length})
               </button>
               {streetsList.map((st) => (
                 <button
@@ -572,6 +803,142 @@ export const SubscribersScreen: FC<SubscribersScreenProps> = ({ tenantId }) => {
               </div>
 
             </form>
+
+          </div>
+        </div>
+      )}
+
+      {/* نافذة استيراد المشتركين من Excel / CSV */}
+      {isImportModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-slate-950/85 backdrop-blur-sm animate-fade-in">
+          <div className="bg-slate-900 border border-slate-800 w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            
+            {/* رأس النافذة */}
+            <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/60">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-blue-500/20 text-blue-400 flex items-center justify-center">
+                  <FileSpreadsheet className="w-5 h-5" />
+                </div>
+                <h3 className="font-bold text-white text-base">استيراد المشتركين من ملف Excel</h3>
+              </div>
+              <button
+                onClick={() => setIsImportModalOpen(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg transition-all"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* محتوى النافذة */}
+            <div className="p-4 space-y-4 overflow-y-auto">
+              
+              {/* الخطوة 1: تنزيل النموذج */}
+              <div className="bg-slate-950 border border-slate-800 p-3.5 rounded-xl flex items-center justify-between gap-3">
+                <div>
+                  <span className="text-xs font-bold text-slate-200 block">
+                    1. تحميل النموذج المعتمد
+                  </span>
+                  <span className="text-[11px] text-slate-400 block mt-0.5">
+                    قم بتنزيل النموذج وتعبئة أسماء المشتركين وأرقام قواطعهم وأمبيراتهم عبر Excel.
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleDownloadTemplate}
+                  className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-amber-400 border border-amber-500/30 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>تنزيل النموذج</span>
+                </button>
+              </div>
+
+              {/* الخطوة 2: رفع الملف */}
+              <div className="space-y-2">
+                <label className="block text-xs font-bold text-slate-200">
+                  2. اختيار ملف الإكسل المعبأ (ملف .csv)
+                </label>
+                <label className="border-2 border-dashed border-slate-700 hover:border-amber-500/60 bg-slate-950/60 hover:bg-slate-950 p-6 rounded-2xl flex flex-col items-center justify-center gap-2 cursor-pointer transition-all">
+                  <Upload className="w-8 h-8 text-amber-400 animate-bounce" />
+                  <span className="text-xs font-bold text-slate-200">
+                    اضغط هنا لاختيار الملف من هاتفك أو جهازك
+                  </span>
+                  <span className="text-[10px] text-slate-500">
+                    يدعم ملفات CSV أو نصوص الإكسل المصدرة
+                  </span>
+                  <input
+                    type="file"
+                    accept=".csv, text/csv, .txt"
+                    onChange={handleFileUpload}
+                    className="hidden"
+                  />
+                </label>
+              </div>
+
+              {/* رسائل الخطأ إن وجدت */}
+              {importError && (
+                <div className="bg-rose-500/15 border border-rose-500/30 p-3 rounded-xl flex items-center gap-2 text-xs text-rose-300">
+                  <AlertCircle className="w-4 h-4 text-rose-400 flex-shrink-0" />
+                  <span>{importError}</span>
+                </div>
+              )}
+
+              {/* المعاينة المسبقة للبيانات */}
+              {parsedImportSubscribers.length > 0 && (
+                <div className="space-y-2">
+                  <div className="bg-emerald-500/15 border border-emerald-500/30 p-2.5 rounded-xl flex items-center gap-2 text-xs font-bold text-emerald-300">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                    <span>
+                      تم فحص الملف بنجاح! تم العثور على {parsedImportSubscribers.length} مشترك جاهز للإدخال.
+                    </span>
+                  </div>
+
+                  {/* قائمة عينات للمعاينة */}
+                  <div className="max-h-44 overflow-y-auto border border-slate-800 rounded-xl divide-y divide-slate-800/80 bg-slate-950 text-xs">
+                    {parsedImportSubscribers.slice(0, 10).map((sub, idx) => (
+                      <div key={idx} className="p-2.5 flex items-center justify-between">
+                        <div>
+                          <span className="font-bold text-white block">{sub.fullName}</span>
+                          <span className="text-[10px] text-slate-400">
+                            {sub.street} - {sub.phone || 'بدون هاتف'}
+                          </span>
+                        </div>
+                        <div className="text-left bg-slate-900 px-2 py-1 rounded border border-slate-800">
+                          <span className="text-amber-400 font-bold block">{sub.breakerNumber}</span>
+                          <span className="text-[10px] text-slate-300">{sub.amperes} أمبير</span>
+                        </div>
+                      </div>
+                    ))}
+                    {parsedImportSubscribers.length > 10 && (
+                      <div className="p-2 text-center text-slate-500 text-[11px] italic">
+                        + {parsedImportSubscribers.length - 10} مشترك إضافي...
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+            </div>
+
+            {/* أزرار الإجراءات في النافذة */}
+            <div className="p-3 bg-slate-950 border-t border-slate-800 flex items-center gap-2">
+              <button
+                type="button"
+                disabled={parsedImportSubscribers.length === 0 || isImporting}
+                onClick={handleConfirmImport}
+                className="flex-1 bg-amber-500 hover:bg-amber-400 disabled:opacity-40 disabled:cursor-not-allowed text-slate-950 font-black py-3 rounded-xl text-xs sm:text-sm transition-all cursor-pointer shadow-lg shadow-amber-500/20 active:scale-95"
+              >
+                {isImporting
+                  ? 'جاري الاستيراد...'
+                  : `تأكيد وإدخال (${parsedImportSubscribers.length}) مشترك الآن`}
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsImportModalOpen(false)}
+                className="bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold py-3 px-4 rounded-xl text-xs sm:text-sm transition-all cursor-pointer"
+              >
+                إلغاء
+              </button>
+            </div>
 
           </div>
         </div>

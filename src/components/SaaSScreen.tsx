@@ -17,7 +17,9 @@ import {
   Check,
   AlertCircle,
   MessageCircle,
-  Clock
+  Clock,
+  Upload,
+  Database
 } from 'lucide-react';
 
 
@@ -36,6 +38,12 @@ export const SaaSScreen: FC<SaaSScreenProps> = ({ settings, onUpdateSettings }) 
   
   const [isSaved, setIsSaved] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<'monthly' | 'yearly'>('monthly');
+
+  // حالة النسخ الاحتياطي والأمان
+  const [isBackingUp, setIsBackingUp] = useState(false);
+  const [isRestoring, setIsRestoring] = useState(false);
+  const [backupMessage, setBackupMessage] = useState<string | null>(null);
+  const [backupError, setBackupError] = useState<string | null>(null);
 
   // إعدادات الطابعة الحرارية والشبكة
   const [isTestPrinting, setIsTestPrinting] = useState(false);
@@ -93,6 +101,141 @@ export const SaaSScreen: FC<SaaSScreenProps> = ({ settings, onUpdateSettings }) 
     onUpdateSettings(updated);
     setIsSaved(true);
     setTimeout(() => setIsSaved(false), 3000);
+  };
+
+  // تصدير نسخة احتياطية شاملة لجميع بيانات المولدة
+  const handleExportFullBackup = async () => {
+    if (!settings) return;
+    try {
+      setIsBackingUp(true);
+      setBackupError(null);
+      const tenantId = settings.id;
+
+      const [tenantSettings, subscribers, cycles, invoices, payments, expenses] = await Promise.all([
+        db.settings.get(tenantId),
+        db.subscribers.where('tenantId').equals(tenantId).toArray(),
+        db.billingCycles.where('tenantId').equals(tenantId).toArray(),
+        db.invoices.where('tenantId').equals(tenantId).toArray(),
+        db.payments.where('tenantId').equals(tenantId).toArray(),
+        db.expenses.where('tenantId').equals(tenantId).toArray(),
+      ]);
+
+      const backupData = {
+        version: 1,
+        appName: 'AlMowallada-SaaS',
+        exportDate: new Date().toISOString(),
+        tenantId,
+        generatorName: settings.generatorName,
+        data: {
+          settings: tenantSettings,
+          subscribers,
+          cycles,
+          invoices,
+          payments,
+          expenses,
+        },
+      };
+
+      const jsonStr = JSON.stringify(backupData, null, 2);
+      const blob = new Blob([jsonStr], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `نسخة-احتياطية-${(settings.generatorName || 'مولدة').replace(/\s+/g, '-')}-${new Date().toISOString().split('T')[0]}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      setBackupMessage('تم تنزيل النسخة الاحتياطية بنجاح على جهازك!');
+      setTimeout(() => setBackupMessage(null), 4000);
+    } catch (err: any) {
+      console.error('Backup error:', err);
+      setBackupError('حدث خطأ أثناء تصدير النسخة الاحتياطية: ' + (err.message || ''));
+    } finally {
+      setIsBackingUp(false);
+    }
+  };
+
+  // استعادة نسخة احتياطية من ملف JSON
+  const handleRestoreBackup = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setBackupError(null);
+    setBackupMessage(null);
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        setIsRestoring(true);
+        const text = event.target?.result as string;
+        const backup = JSON.parse(text);
+
+        if (!backup.data || !backup.appName) {
+          throw new Error('الملف غير صالح أو ليس ملف نسخة احتياطية معتمد للمنظومة.');
+        }
+
+        const subCount = backup.data.subscribers?.length || 0;
+        const payCount = backup.data.payments?.length || 0;
+        const expCount = backup.data.expenses?.length || 0;
+
+        const confirmMsg = `تحتوي هذه النسخة الاحتياطية على:\n` +
+          `- ${subCount} مشترك\n` +
+          `- ${payCount} سند قبض\n` +
+          `- ${expCount} مصروف مسجل\n\n` +
+          `هل أنت متأكد من استعادة هذه البيانات؟ سيتم دمج وتحديث السجلات في قاعدة البيانات المحلية.`;
+
+        if (!window.confirm(confirmMsg)) {
+          setIsRestoring(false);
+          return;
+        }
+
+        if (backup.data.settings) {
+          await db.settings.put(backup.data.settings);
+          onUpdateSettings(backup.data.settings);
+        }
+
+        if (backup.data.subscribers) {
+          for (const s of backup.data.subscribers) {
+            await db.subscribers.put(s);
+          }
+        }
+
+        if (backup.data.cycles) {
+          for (const c of backup.data.cycles) {
+            await db.billingCycles.put(c);
+          }
+        }
+
+        if (backup.data.invoices) {
+          for (const inv of backup.data.invoices) {
+            await db.invoices.put(inv);
+          }
+        }
+
+        if (backup.data.payments) {
+          for (const p of backup.data.payments) {
+            await db.payments.put(p);
+          }
+        }
+
+        if (backup.data.expenses) {
+          for (const exp of backup.data.expenses) {
+            await db.expenses.put(exp);
+          }
+        }
+
+        setBackupMessage(`تمت استعادة النسخة الاحتياطية بنجاح (${subCount} مشترك و ${payCount} سند قبض)!`);
+        setTimeout(() => setBackupMessage(null), 5000);
+      } catch (err: any) {
+        console.error('Restore error:', err);
+        setBackupError('تعذر استعادة البيانات: ' + (err.message || 'الملف تالف'));
+      } finally {
+        setIsRestoring(false);
+      }
+    };
+    reader.readAsText(file, 'utf-8');
   };
 
   const isTrial = settings?.subscriptionStatus === 'trial' || settings?.plan === 'trial';
@@ -461,6 +604,70 @@ export const SaaSScreen: FC<SaaSScreenProps> = ({ settings, onUpdateSettings }) 
 
           <div className="text-[11px] text-slate-400 leading-relaxed bg-slate-950/60 p-2.5 rounded-xl border border-slate-800/80">
             💡 <strong>ملاحظة هامة:</strong> عند فتح هذا الرابط من متصفح Chrome أو Edge على هاتفك، سيتصل بنظام الجباية مباشرة، ويمكنك اقتران طابعة البلوتوث المحمولة بهاتفك والطباعة فورياً أثناء التجوال.
+          </div>
+        </div>
+
+        {/* بطاقة الأمان والنسخ الاحتياطي المحلي الشامل */}
+        <div className="bg-slate-800/90 border border-slate-700 rounded-2xl p-5 shadow-lg space-y-4">
+          <div className="flex items-center justify-between border-b border-slate-700/80 pb-3">
+            <h3 className="font-bold text-sm text-white flex items-center gap-2">
+              <Database className="w-4 h-4 text-amber-400" />
+              <span>النسخ الاحتياطي والأمان المحلي لبيانات المولدة</span>
+            </h3>
+            <span className="text-[11px] bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-full font-semibold">
+              أمان وخصوصية 100%
+            </span>
+          </div>
+
+          <p className="text-xs text-slate-300 leading-relaxed">
+            يمكنك حفظ نسخة احتياطية كاملة من بيانات المشتركين، سندات القبض، الفواتير، وسجل المصاريف بملف على هاتفك أو جهازك، واستعادتها في أي وقت لضمان راحة بالك التامة.
+          </p>
+
+          {/* تنبيهات النجاح أو الخطأ في النسخ الاحتياطي */}
+          {backupMessage && (
+            <div className="bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 p-3 rounded-xl text-xs flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
+              <span>{backupMessage}</span>
+            </div>
+          )}
+
+          {backupError && (
+            <div className="bg-rose-500/15 border border-rose-500/40 text-rose-300 p-3 rounded-xl text-xs flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 flex-shrink-0" />
+              <span>{backupError}</span>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+            
+            {/* زر تصدير النسخة الاحتياطية */}
+            <button
+              type="button"
+              onClick={handleExportFullBackup}
+              disabled={isBackingUp}
+              className="flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-black py-3 px-4 rounded-xl shadow-lg shadow-amber-500/20 text-xs sm:text-sm transition-all cursor-pointer"
+            >
+              <Download className={`w-4 h-4 ${isBackingUp ? 'animate-bounce' : ''}`} />
+              <span>{isBackingUp ? 'جاري تجهيز النسخة...' : 'تنزيل نسخة احتياطية شاملة (.json)'}</span>
+            </button>
+
+            {/* زر استعادة النسخة الاحتياطية */}
+            <label className="flex items-center justify-center gap-2 bg-slate-700 hover:bg-slate-600 active:scale-95 text-white font-bold py-3 px-4 rounded-xl border border-slate-600 text-xs sm:text-sm transition-all cursor-pointer text-center">
+              <Upload className={`w-4 h-4 text-blue-400 ${isRestoring ? 'animate-spin' : ''}`} />
+              <span>{isRestoring ? 'جاري استعادة البيانات...' : 'استعادة نسخة احتياطية من ملف'}</span>
+              <input
+                type="file"
+                accept=".json, application/json"
+                onChange={handleRestoreBackup}
+                className="hidden"
+                disabled={isRestoring}
+              />
+            </label>
+
+          </div>
+
+          <div className="text-[11px] text-slate-400 bg-slate-950/60 p-2.5 rounded-xl border border-slate-800">
+            🔒 <strong>تلميح أمني:</strong> يُنصح بتنزيل نسخة احتياطية أسبوعياً أو عند نهاية كل دورة جباية شهرية والاحتفاظ بها على هاتفك أو إرسالها لبريدك الإلكتروني الشخصي.
           </div>
         </div>
 

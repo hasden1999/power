@@ -6,6 +6,7 @@ import { Navbar } from './components/Navbar';
 import { CollectionScreen } from './components/CollectionScreen';
 import { SubscribersScreen } from './components/SubscribersScreen';
 import { PricingScreen } from './components/PricingScreen';
+import { ExpensesScreen } from './components/ExpensesScreen';
 import { SaaSScreen } from './components/SaaSScreen';
 import { AuthScreen } from './components/AuthScreen';
 import { SuperAdminScreen } from './components/SuperAdminScreen';
@@ -21,7 +22,7 @@ export function App() {
   // وضع المعاينة والدعم الفني للسوبر أدمن
   const [impersonatedTenant, setImpersonatedTenant] = useState<TenantSettings | null>(null);
 
-  const [currentTab, setCurrentTab] = useState<'collection' | 'subscribers' | 'pricing' | 'saas'>('collection');
+  const [currentTab, setCurrentTab] = useState<'collection' | 'subscribers' | 'pricing' | 'expenses' | 'saas'>('collection');
   const [isInitialized, setIsInitialized] = useState(false);
   const [isInstallOpen, setIsInstallOpen] = useState(false);
 
@@ -300,6 +301,14 @@ export function App() {
 
         {currentTab === 'pricing' && (
           <PricingScreen
+            tenantId={tenantId}
+            settings={activeSettings}
+            onRefreshSync={syncInfo.refreshPendingCount}
+          />
+        )}
+
+        {currentTab === 'expenses' && (
+          <ExpensesScreen
             tenantId={tenantId}
             settings={activeSettings}
             onRefreshSync={syncInfo.refreshPendingCount}
