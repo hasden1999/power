@@ -165,17 +165,27 @@ const SyncBadge: FC<{ syncInfo: SyncStatusInfo }> = ({ syncInfo }) => {
         </div>
       )}
 
-      {syncInfo.pendingCount > 0 ? (
-        <button
-          onClick={syncInfo.triggerSync}
-          disabled={!syncInfo.isOnline || syncInfo.isSyncing}
-          className="flex items-center gap-1 bg-amber-500/10 border border-amber-500/30 text-amber-400 hover:bg-amber-500/20 px-2.5 py-1 rounded-lg text-xs font-semibold cursor-pointer transition-all"
-          title="معاملات محفوظة محلياً تنتظر المزامنة"
-        >
-          <RefreshCw className={`w-3.5 h-3.5 ${syncInfo.isSyncing ? 'animate-spin' : ''}`} />
-          <span>{syncInfo.pendingCount} معلقة</span>
-        </button>
-      ) : null}
+      <button
+        onClick={syncInfo.triggerSync}
+        disabled={!syncInfo.isOnline || syncInfo.isSyncing}
+        className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold cursor-pointer transition-all ${
+          syncInfo.isSyncing
+            ? 'bg-amber-500/20 border border-amber-500/40 text-amber-300'
+            : syncInfo.pendingCount > 0
+            ? 'bg-amber-500/10 border border-amber-500/30 text-amber-400 hover:bg-amber-500/20'
+            : 'bg-slate-900/80 border border-slate-800 text-slate-300 hover:text-emerald-400 hover:bg-slate-800'
+        }`}
+        title="مزامنة سحابية لحظية مع خادم Supabase"
+      >
+        <RefreshCw className={`w-3.5 h-3.5 ${syncInfo.isSyncing ? 'animate-spin text-amber-400' : ''}`} />
+        <span>
+          {syncInfo.isSyncing
+            ? 'مزامنة...'
+            : syncInfo.pendingCount > 0
+            ? `${syncInfo.pendingCount} معلقة`
+            : 'مزامنة سحابية'}
+        </span>
+      </button>
     </div>
   );
 };

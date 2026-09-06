@@ -21,11 +21,11 @@ export function App() {
   const [currentTab, setCurrentTab] = useState<'collection' | 'subscribers' | 'pricing' | 'saas'>('collection');
   const [isInitialized, setIsInitialized] = useState(false);
 
-  // إدارة المزامنة وحالة الاتصال
-  const syncInfo = useSyncManager();
-
   // جلب إعدادات المولدة الحالية المسجل الدخول بها
   const activeTenantId = impersonatedTenant?.id || currentTenant?.id || '';
+
+  // إدارة المزامنة وحالة الاتصال بالسحابة
+  const syncInfo = useSyncManager(activeTenantId);
   const tenantFromDb = useLiveQuery(
     () => (activeTenantId ? db.settings.get(activeTenantId) : undefined),
     [activeTenantId]
