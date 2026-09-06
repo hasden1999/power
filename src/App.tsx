@@ -12,6 +12,8 @@ import { AuthScreen } from './components/AuthScreen';
 import { SuperAdminScreen } from './components/SuperAdminScreen';
 import { InstallModal } from './components/InstallModal';
 import { SubscriptionStatusScreen } from './components/SubscriptionStatusScreen';
+import { MobileBottomNav } from './components/MobileBottomNav';
+import { QuickActionHub } from './components/QuickActionHub';
 import { supabase } from './services/supabaseClient';
 import type { TenantSettings, UserAccount } from './types';
 
@@ -25,6 +27,7 @@ export function App() {
   const [currentTab, setCurrentTab] = useState<'collection' | 'subscribers' | 'pricing' | 'expenses' | 'saas'>('collection');
   const [isInitialized, setIsInitialized] = useState(false);
   const [isInstallOpen, setIsInstallOpen] = useState(false);
+  const [isQuickActionOpen, setIsQuickActionOpen] = useState(false);
 
   // جلب إعدادات المولدة الحالية المسجل الدخول بها
   const activeTenantId = impersonatedTenant?.id || currentTenant?.id || '';
@@ -285,7 +288,7 @@ export function App() {
       />
 
       {/* المحتوى الرئيسي للمولدة */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 pt-4 sm:pt-6">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 pt-4 sm:pt-6 pb-28 md:pb-12">
         
         {currentTab === 'collection' && (
           <CollectionScreen
@@ -324,8 +327,25 @@ export function App() {
 
       </main>
 
-      {/* تذييل الصفحة */}
-      <footer className="py-3 border-t border-slate-800/80 text-center text-xs text-slate-500 bg-slate-950">
+      {/* شريط التنقل السفلي السريع للهواتف (Thumb Zone) */}
+      <MobileBottomNav
+        currentTab={currentTab}
+        setCurrentTab={setCurrentTab}
+        onOpenQuickAction={() => setIsQuickActionOpen(true)}
+      />
+
+      {/* صفيحة الإجراءات السريعة الفورية */}
+      <QuickActionHub
+        isOpen={isQuickActionOpen}
+        onClose={() => setIsQuickActionOpen(false)}
+        onNavigateTab={(tab) => {
+          setCurrentTab(tab);
+          setIsQuickActionOpen(false);
+        }}
+      />
+
+      {/* تذييل الصفحة (مخفي في الهواتف لمنح الشاشة كامل المساحة) */}
+      <footer className="hidden md:block py-3 border-t border-slate-800/80 text-center text-xs text-slate-500 bg-slate-950">
         <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
           <span>
             منصة ساس المولدات الأهلية العراقية © {new Date().getFullYear()} - مرخصة لمولدة: {activeSettings?.generatorName}

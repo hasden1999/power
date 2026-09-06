@@ -76,8 +76,8 @@ export const Navbar: FC<NavbarProps> = ({
           </div>
         </div>
 
-        {/* أزرار التنقل بين الشاشات */}
-        <nav className="flex items-center bg-slate-900/90 p-1 rounded-xl border border-slate-800 w-full md:w-auto justify-around sm:justify-start gap-1 overflow-x-auto">
+        {/* أزرار التنقل بين الشاشات (تظهر للشاشات الكبيرة، بينما تعتمد الهواتف على الشريط السفلي) */}
+        <nav className="hidden md:flex items-center bg-slate-900/90 p-1 rounded-xl border border-slate-800 w-full md:w-auto justify-around sm:justify-start gap-1 overflow-x-auto">
           <button
             onClick={() => setCurrentTab('collection')}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition-all whitespace-nowrap ${

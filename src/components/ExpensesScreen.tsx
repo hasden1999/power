@@ -2,6 +2,7 @@ import { useState, useMemo, type FC } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/db';
 import { formatIQD } from '../services/billingService';
+import { BottomSheet } from './BottomSheet';
 import type { Expense, ExpenseCategory, TenantSettings } from '../types';
 import {
   DollarSign,
@@ -13,7 +14,6 @@ import {
   TrendingUp,
   TrendingDown,
   Calendar,
-  X,
   FileSpreadsheet,
   AlertCircle
 } from 'lucide-react';
@@ -495,163 +495,157 @@ export const ExpensesScreen: FC<ExpensesScreenProps> = ({
         )}
       </div>
 
-      {/* نافذة إضافة مصروف جديد (Modal) مهيأة للهواتف المحمولة */}
-      {isAddModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-slate-950/80 backdrop-blur-sm animate-fade-in">
-          <div className="bg-slate-900 border border-slate-800 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
-            
-            {/* عنوان النافذة */}
-            <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/50">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center">
-                  <Plus className="w-5 h-5" />
-                </div>
-                <h3 className="font-bold text-white text-base">تسجيل مصروف جديد</h3>
-              </div>
-              <button
-                onClick={() => setIsAddModalOpen(false)}
-                className="text-slate-400 hover:text-white p-1 rounded-lg transition-all"
-              >
-                <X className="w-5 h-5" />
-              </button>
+      {/* صفيحة إضافة مصروف جديد المنزلقة (Add Expense Bottom Sheet) */}
+      <BottomSheet
+        isOpen={isAddModalOpen}
+        onClose={() => setIsAddModalOpen(false)}
+        title="تسجيل مصروف جديد"
+        subtitle="كاز، دهن وفلاتر، تصليح أعطال، أو رواتب"
+        icon={<Plus className="w-5 h-5 text-amber-400" />}
+        footer={
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={isSubmitting}
+              onClick={handleAddExpense}
+              className="flex-1 bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-black py-3 rounded-xl text-sm transition-all cursor-pointer shadow-lg shadow-amber-500/20"
+            >
+              {isSubmitting ? 'جاري الحفظ...' : 'حفظ المصروف'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsAddModalOpen(false)}
+              className="bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold py-3 px-4 rounded-xl text-sm transition-all cursor-pointer"
+            >
+              إلغاء
+            </button>
+          </div>
+        }
+      >
+        <form onSubmit={handleAddExpense} className="space-y-3.5">
+          {/* اختيار التصنيف */}
+          <div>
+            <label className="block text-xs font-bold text-slate-300 mb-1">
+              تصنيف المصروف <span className="text-rose-400">*</span>
+            </label>
+            <div className="grid grid-cols-3 gap-1.5">
+              {(Object.keys(CATEGORY_LABELS) as ExpenseCategory[]).map((catKey) => {
+                const isSelected = category === catKey;
+                return (
+                  <button
+                    type="button"
+                    key={catKey}
+                    onClick={() => setCategory(catKey)}
+                    className={`p-2 rounded-xl text-xs font-bold transition-all border text-center cursor-pointer ${
+                      isSelected
+                        ? 'bg-amber-500 text-slate-950 border-amber-400 shadow'
+                        : 'bg-slate-950 text-slate-300 border-slate-800 hover:bg-slate-800/80'
+                    }`}
+                  >
+                    {CATEGORY_LABELS[catKey].label}
+                  </button>
+                );
+              })}
             </div>
+          </div>
 
-            {/* محتوى النموذج */}
-            <form onSubmit={handleAddExpense} className="p-4 space-y-3.5 overflow-y-auto">
-              
-              {/* اختيار التصنيف */}
-              <div>
-                <label className="block text-xs font-bold text-slate-300 mb-1">
-                  تصنيف المصروف <span className="text-rose-400">*</span>
-                </label>
-                <div className="grid grid-cols-3 gap-1.5">
-                  {(Object.keys(CATEGORY_LABELS) as ExpenseCategory[]).map((catKey) => {
-                    const isSelected = category === catKey;
-                    return (
-                      <button
-                        type="button"
-                        key={catKey}
-                        onClick={() => setCategory(catKey)}
-                        className={`p-2 rounded-xl text-xs font-bold transition-all border text-center cursor-pointer ${
-                          isSelected
-                            ? 'bg-amber-500 text-slate-950 border-amber-400 shadow'
-                            : 'bg-slate-950 text-slate-300 border-slate-800 hover:bg-slate-800/80'
-                        }`}
-                      >
-                        {CATEGORY_LABELS[catKey].label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
+          {/* اسم وتفاصيل المصروف */}
+          <div>
+            <label className="block text-xs font-bold text-slate-300 mb-1">
+              اسم المصروف أو البيان <span className="text-rose-400">*</span>
+            </label>
+            <input
+              type="text"
+              required
+              placeholder={
+                category === 'fuel'
+                  ? 'مثال: شراء صهريج كاز (وجبة صباحية)'
+                  : category === 'oil_maintenance'
+                  ? 'مثال: تبديل دهن ماكنة 20 لتر مع فلاتر'
+                  : category === 'salaries'
+                  ? 'مثال: راتب الجابي لشهر آذار'
+                  : 'بيان المصروف...'
+              }
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none transition-all"
+            />
+          </div>
 
-              {/* اسم وتفاصيل المصروف */}
-              <div>
-                <label className="block text-xs font-bold text-slate-300 mb-1">
-                  اسم المصروف أو البيان <span className="text-rose-400">*</span>
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder={
-                    category === 'fuel'
-                      ? 'مثال: شراء صهريج كاز (وجبة صباحية)'
-                      : category === 'oil_maintenance'
-                      ? 'مثال: تبديل دهن ماكنة 20 لتر مع فلاتر'
-                      : category === 'salaries'
-                      ? 'مثال: راتب الجابي لشهر آذار'
-                      : 'بيان المصروف...'
-                  }
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none transition-all"
-                />
-              </div>
+          {/* أزرار مبالغ نقدية سريعة */}
+          <div>
+            <label className="block text-xs font-bold text-slate-300 mb-1">
+              المبلغ الإجمالي (د.ع) <span className="text-rose-400">*</span>
+            </label>
+            <div className="grid grid-cols-4 gap-1.5 mb-2">
+              {[50000, 100000, 250000, 500000].map((quick) => (
+                <button
+                  key={quick}
+                  type="button"
+                  onClick={() => setAmount(quick.toString())}
+                  className="bg-slate-950 hover:bg-slate-800 border border-slate-800 text-amber-300 text-[11px] font-bold py-1.5 rounded-lg active:scale-95 transition-all cursor-pointer text-center"
+                >
+                  {quick >= 1000 ? `${quick / 1000} ألف` : quick}
+                </button>
+              ))}
+            </div>
+            <input
+              type="text"
+              inputMode="numeric"
+              required
+              placeholder="مثال: 450000"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value.replace(/[^0-9]/g, ''))}
+              className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 rounded-xl px-3.5 py-2.5 text-sm font-bold text-white focus:outline-none transition-all"
+            />
+          </div>
 
-              {/* المبلغ بالدينار العراقي */}
-              <div>
-                <label className="block text-xs font-bold text-slate-300 mb-1">
-                  المبلغ الإجمالي (د.ع) <span className="text-rose-400">*</span>
-                </label>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  required
-                  placeholder="مثال: 450000"
-                  value={amount}
-                  onChange={(e) => setAmount(e.target.value.replace(/[^0-9]/g, ''))}
-                  className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 rounded-xl px-3.5 py-2.5 text-sm font-bold text-white focus:outline-none transition-all"
-                />
-              </div>
-
-              {/* حقل اللترات في حال كان التصنيف وقود */}
-              {category === 'fuel' && (
-                <div className="bg-amber-500/10 border border-amber-500/20 p-3 rounded-xl space-y-2">
-                  <label className="block text-xs font-bold text-amber-300">
-                    كمية الوقود (باللتر) <span className="text-slate-400 font-normal">(اختياري لحساب تكلفة اللتر)</span>
-                  </label>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    placeholder="مثال: 500 أو 1000 لتر"
-                    value={liters}
-                    onChange={(e) => setLiters(e.target.value.replace(/[^0-9.]/g, ''))}
-                    className="w-full bg-slate-950 border border-amber-500/40 focus:border-amber-400 rounded-xl px-3 py-2 text-sm text-white focus:outline-none"
-                  />
-                  {amount && liters && parseFloat(liters) > 0 && (
-                    <div className="text-xs text-amber-400 font-bold">
-                      💡 تكلفة اللتر المحسوبة: {Math.round(parseInt(amount, 10) / parseFloat(liters))} دينار / لتر
-                    </div>
-                  )}
+          {/* حقل اللترات في حال كان التصنيف وقود */}
+          {category === 'fuel' && (
+            <div className="bg-amber-500/10 border border-amber-500/20 p-3 rounded-xl space-y-2">
+              <label className="block text-xs font-bold text-amber-300">
+                كمية الوقود (باللتر) <span className="text-slate-400 font-normal">(لحساب تكلفة اللتر)</span>
+              </label>
+              <input
+                type="text"
+                inputMode="numeric"
+                placeholder="مثال: 500 أو 1000 لتر"
+                value={liters}
+                onChange={(e) => setLiters(e.target.value.replace(/[^0-9.]/g, ''))}
+                className="w-full bg-slate-950 border border-amber-500/40 focus:border-amber-400 rounded-xl px-3 py-2 text-sm text-white focus:outline-none"
+              />
+              {amount && liters && parseFloat(liters) > 0 && (
+                <div className="text-xs text-amber-400 font-bold">
+                  💡 تكلفة اللتر المحسوبة: {Math.round(parseInt(amount, 10) / parseFloat(liters))} دينار / لتر
                 </div>
               )}
+            </div>
+          )}
 
-              {/* التاريخ */}
-              <div>
-                <label className="block text-xs font-bold text-slate-300 mb-1">تاريخ المصروف</label>
-                <input
-                  type="date"
-                  value={expenseDate}
-                  onChange={(e) => setExpenseDate(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none"
-                />
-              </div>
-
-              {/* ملاحظات */}
-              <div>
-                <label className="block text-xs font-bold text-slate-300 mb-1">ملاحظات إضافية (اختياري)</label>
-                <input
-                  type="text"
-                  placeholder="رقم الوصل، اسم المحطة، اسم المصلح..."
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none"
-                />
-              </div>
-
-              {/* أزرار الحفظ والإلغاء */}
-              <div className="pt-2 flex items-center gap-2">
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="flex-1 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black py-3 rounded-xl text-sm transition-all cursor-pointer shadow-lg shadow-amber-500/20 active:scale-95"
-                >
-                  {isSubmitting ? 'جاري الحفظ...' : 'حفظ المصروف'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setIsAddModalOpen(false)}
-                  className="bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold py-3 px-4 rounded-xl text-sm transition-all cursor-pointer"
-                >
-                  إلغاء
-                </button>
-              </div>
-
-            </form>
-
+          {/* التاريخ */}
+          <div>
+            <label className="block text-xs font-bold text-slate-300 mb-1">تاريخ المصروف</label>
+            <input
+              type="date"
+              value={expenseDate}
+              onChange={(e) => setExpenseDate(e.target.value)}
+              className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none"
+            />
           </div>
-        </div>
-      )}
+
+          {/* ملاحظات */}
+          <div>
+            <label className="block text-xs font-bold text-slate-300 mb-1">ملاحظات إضافية (اختياري)</label>
+            <input
+              type="text"
+              placeholder="رقم الوصل، اسم المحطة، اسم المصلح..."
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none"
+            />
+          </div>
+        </form>
+      </BottomSheet>
 
     </div>
   );
