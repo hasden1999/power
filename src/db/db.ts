@@ -1,4 +1,5 @@
 import Dexie, { type Table } from 'dexie';
+import { supabase } from '../services/supabaseClient';
 import type { Subscriber, BillingCycle, Invoice, Payment, TenantSettings, UserAccount } from '../types';
 
 export interface SyncQueueItem {
@@ -39,18 +40,38 @@ export const db = new GeneratorDatabase();
 
 // دالة تهيئة بيانات منصة الـ SaaS متعددة المستأجرين مع حساب صاحب المنصة
 export async function seedInitialData() {
-  const usersCount = await db.users.count();
-  if (usersCount > 0) return;
-
-  // 1. حساب صاحب المنصة (Super Admin)
+  // 1. حساب صاحب المنصة (Super Admin) بتسجيل الدخول الجديد
   const superAdminUser: UserAccount = {
     id: 'user-super-admin',
-    username: 'admin',
-    password: 'admin123',
-    fullName: 'المهندس مدير المنصة',
+    username: 'power',
+    password: 'Qaqaqa12@12',
+    fullName: 'صاحب المنصة',
     role: 'super_admin',
     createdAt: new Date().toISOString(),
   };
+
+  // التأكد دائماً من وجود حساب السوبر أدمن الجديد وحذف القديم
+  await db.users.put(superAdminUser);
+  await db.users.where('username').equals('admin').delete();
+
+  if (navigator.onLine) {
+    try {
+      await supabase.from('users').upsert({
+        id: 'user-super-admin',
+        username: 'power',
+        password: 'Qaqaqa12@12',
+        full_name: 'صاحب المنصة',
+        role: 'super_admin',
+        tenant_id: null,
+      });
+      await supabase.from('users').delete().eq('username', 'admin');
+    } catch {
+      // تجاهل أي خطأ عابر
+    }
+  }
+
+  const usersCount = await db.users.count();
+  if (usersCount > 1) return;
 
   // 2. مستأجري المولدات (المولدات المشتركة في المنظومة في العراق)
   const tenants: TenantSettings[] = [
@@ -61,7 +82,7 @@ export async function seedInitialData() {
       phone: '07701234567',
       address: 'بغداد - المنصور - محلة 605',
       plan: 'monthly',
-      planPrice: 20000,
+      planPrice: 15000,
       subscriptionStatus: 'active',
       isBlocked: false,
       expiresAt: new Date(Date.now() + 25 * 24 * 60 * 60 * 1000).toISOString(),
@@ -77,7 +98,7 @@ export async function seedInitialData() {
       phone: '07801234567',
       address: 'البصرة - العشار - شارع الكويت',
       plan: 'yearly',
-      planPrice: 180000,
+      planPrice: 150000,
       subscriptionStatus: 'active',
       isBlocked: false,
       expiresAt: new Date(Date.now() + 180 * 24 * 60 * 60 * 1000).toISOString(),

@@ -40,7 +40,7 @@ export const SuperAdminScreen: FC<SuperAdminScreenProps> = ({
 
   // رقم واتساب مدير المنصة لتلقي الدفعات
   const [adminPhone, setAdminPhone] = useState(
-    localStorage.getItem('platform_admin_phone') || '07701234567'
+    localStorage.getItem('platform_admin_phone') || '07764271130'
   );
   const [savedPhoneMsg, setSavedPhoneMsg] = useState(false);
 
@@ -126,7 +126,7 @@ export const SuperAdminScreen: FC<SuperAdminScreenProps> = ({
   const handleActivateOrExtend = async (tenant: TenantSettings, days: number) => {
     const isYearly = days >= 365;
     const planName = isYearly ? 'yearly' : 'monthly';
-    const priceToAdd = isYearly ? 180000 : 20000;
+    const priceToAdd = isYearly ? 150000 : 15000;
 
     // احتساب التاريخ الجديد (إذا كان منتهي أو معلق يبدأ من تاريخ اليوم)
     const baseDate =
@@ -205,7 +205,7 @@ export const SuperAdminScreen: FC<SuperAdminScreenProps> = ({
     const expiryDateStr = new Date(tenant.expiresAt).toLocaleDateString('ar-IQ');
     const message = `تحية طيبة أخي العزيز ${tenant.ownerName} صاحب (${tenant.generatorName})،
 نود إعلامكم بأن اشتراك منظومة المولدات الأهلية السحابية الخاص بكم ينتهي بتاريخ: ${expiryDateStr}.
-يرجى تحويل رسوم التجديد الشهري (20,000 د.ع) أو السنوي (180,000 د.ع) عبر زين كاش على رقم الإدارة: ${adminPhone} لضمان استمرار عمل المنظومة والمزامنة السحابية.
+يرجى تحويل رسوم التجديد الشهري (15,000 د.ع) أو السنوي (150,000 د.ع - خصم شهرين) على رقم إدارة المنصة: ${adminPhone} لضمان استمرار عمل المنظومة والمزامنة السحابية.
 تحياتنا، إدارة منصة المولدات.`;
 
     window.open(`https://wa.me/${phone}?text=${encodeURIComponent(message)}`, '_blank');
@@ -548,7 +548,7 @@ export const SuperAdminScreen: FC<SuperAdminScreenProps> = ({
                     <button
                       onClick={() => handleActivateOrExtend(t, 30)}
                       className="bg-emerald-600 hover:bg-emerald-500 text-white font-black py-2 px-2 rounded-xl text-xs flex items-center justify-center gap-1 transition-all shadow-md shadow-emerald-600/20 cursor-pointer"
-                      title="تفعيل أو تجديد الاشتراك لمدة شهر (30 يوم) واستلام 20,000 د.ع"
+                      title="تفعيل أو تجديد الاشتراك لمدة شهر (30 يوم) واستلام 15,000 د.ع"
                     >
                       <CalendarCheck className="w-3.5 h-3.5" />
                       <span>تفعيل شهري (+30 يوم)</span>
@@ -557,7 +557,7 @@ export const SuperAdminScreen: FC<SuperAdminScreenProps> = ({
                     <button
                       onClick={() => handleActivateOrExtend(t, 365)}
                       className="bg-purple-600 hover:bg-purple-500 text-white font-black py-2 px-2 rounded-xl text-xs flex items-center justify-center gap-1 transition-all shadow-md shadow-purple-600/20 cursor-pointer"
-                      title="تفعيل أو تجديد الاشتراك لمدة سنة كاملة (365 يوم) واستلام 180,000 د.ع"
+                      title="تفعيل أو تجديد الاشتراك لمدة سنة كاملة (365 يوم) واستلام 150,000 د.ع"
                     >
                       <ShieldCheck className="w-3.5 h-3.5" />
                       <span>تفعيل سنوي (+365)</span>

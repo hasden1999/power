@@ -84,7 +84,7 @@ export interface TenantSettings {
   phone: string;
   address: string; // المدينة والمحافظة
   plan: 'trial' | 'monthly' | 'yearly';
-  planPrice: number; // سعر الاشتراك بالدينار العراقي (مثلاً 20,000 د.ع أو 180,000 د.ع)
+  planPrice: number; // سعر الاشتراك بالدينار العراقي (مثلاً 15,000 د.ع أو 150,000 د.ع)
   subscriptionStatus: 'active' | 'expired' | 'grace_period' | 'pending_activation';
   isBlocked: boolean; // حظر من قبل صاحب المنصة
   expiresAt: string;

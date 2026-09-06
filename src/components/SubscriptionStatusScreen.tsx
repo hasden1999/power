@@ -16,7 +16,7 @@ export const SubscriptionStatusScreen: FC<SubscriptionStatusScreenProps> = ({
   user,
   onLogout,
   onRefreshTenant,
-  adminPhone = '07700000000',
+  adminPhone = '07764271130',
 }) => {
   const [isChecking, setIsChecking] = useState(false);
   const [checkMsg, setCheckMsg] = useState<string | null>(null);
@@ -53,7 +53,7 @@ export const SubscriptionStatusScreen: FC<SubscriptionStatusScreenProps> = ({
     if (isExpired) reasonText = 'تجديد اشتراكي المنتهي';
     if (isBlocked) reasonText = 'مراجعة سبب إيقاف الحساب';
 
-    const planType = tenant.plan === 'yearly' ? 'السنوي (180,000 د.ع)' : 'الشهري (20,000 د.ع)';
+    const planType = tenant.plan === 'yearly' ? 'السنوي (150,000 د.ع - خصم شهرين)' : 'الشهري (15,000 د.ع)';
 
     const message = `السلام عليكم ورحمة الله،
 أنا الأخ ${tenant.ownerName || user.fullName}، صاحب (${tenant.generatorName}).
@@ -125,13 +125,13 @@ export const SubscriptionStatusScreen: FC<SubscriptionStatusScreenProps> = ({
           <div className="grid grid-cols-2 gap-2 text-xs">
             <div className="bg-slate-900 p-2.5 rounded-xl border border-slate-800">
               <span className="text-slate-400 block text-[11px]">الاشتراك الشهري</span>
-              <strong className="text-white text-sm">20,000 د.ع</strong>
+              <strong className="text-white text-sm">15,000 د.ع</strong>
               <span className="text-[10px] text-emerald-400 block mt-0.5">صلاحية 30 يوماً</span>
             </div>
             <div className="bg-slate-900 p-2.5 rounded-xl border border-amber-500/30">
-              <span className="text-amber-400 block text-[11px] font-bold">الاشتراك السنوي (الأوفر)</span>
-              <strong className="text-white text-sm">180,000 د.ع</strong>
-              <span className="text-[10px] text-emerald-400 block mt-0.5">توفير شهرين كاملين</span>
+              <span className="text-amber-400 block text-[11px] font-bold">الاشتراك السنوي (خصم شهرين)</span>
+              <strong className="text-white text-sm">150,000 د.ع</strong>
+              <span className="text-[10px] text-emerald-400 block mt-0.5">توفير 30,000 د.ع</span>
             </div>
           </div>
 
@@ -148,7 +148,7 @@ export const SubscriptionStatusScreen: FC<SubscriptionStatusScreenProps> = ({
             className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-black py-3 px-4 rounded-2xl text-sm transition-all shadow-lg shadow-emerald-600/20 cursor-pointer"
           >
             <MessageCircle className="w-5 h-5 fill-white" />
-            <span>تواصل مع صاحب المنصة عبر واتساب للتفعيل</span>
+            <span>تواصل مع المطور عبر واتساب (07764271130) للتفعيل</span>
           </button>
 
           <button

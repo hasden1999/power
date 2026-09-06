@@ -15,7 +15,8 @@ import {
   Wifi,
   Copy,
   Check,
-  AlertCircle
+  AlertCircle,
+  MessageCircle
 } from 'lucide-react';
 
 
@@ -93,22 +94,26 @@ export const SaaSScreen: FC<SaaSScreenProps> = ({ settings, onUpdateSettings }) 
     setTimeout(() => setIsSaved(false), 3000);
   };
 
-  // طلب تجديد أو تفعيل الاشتراك عبر واتساب مدير المنصة
+  // طلب تجديد أو تفعيل الاشتراك عبر واتساب مطور المنصة
   const handleRequestRenewalWhatsApp = () => {
-    const adminPhone = localStorage.getItem('platform_admin_phone') || '07701234567';
-    let cleanPhone = adminPhone.trim().replace(/\s+/g, '').replace(/-/g, '');
-    if (cleanPhone.startsWith('07')) {
-      cleanPhone = '964' + cleanPhone.substring(1);
-    }
+    const devPhone = '9647764271130';
+    const planStr = selectedPlan === 'yearly' ? 'السنوي (150,000 د.ع - خصم شهرين)' : 'الشهري (15,000 د.ع)';
+    const expiryDateStr = settings?.expiresAt
+      ? new Date(settings.expiresAt).toLocaleDateString('ar-IQ')
+      : 'غير محدد';
 
-    const planStr = selectedPlan === 'yearly' ? 'السنوي (180,000 د.ع)' : 'الشهري (20,000 د.ع)';
     const message = `السلام عليكم ورحمة الله،
-أنا الأخ ${ownerName} صاحب (${generatorName}).
-رقم الهاتف المسجل: ${phone}
-أرغب بـ تفعيل/تجديد اشتراك المنظومة للاشتراك ${planStr}.
-يرجى تزويدي برقم محفظة زين كاش أو كي كارد لتسديد المبلغ وتفعيل الحساب. شكراً جزيلاً!`;
+أود تجديد اشتراك منظومة المولدات الأهلية:
+📌 اسم المولدة: ${generatorName}
+👤 اسم صاحب المولدة: ${ownerName}
+📞 رقم الهاتف المسجل: ${phone}
+📍 المحافظة والمنطقة: ${address}
+⏳ تاريخ انتهاء الاشتراك الحالي: ${expiryDateStr} (متبقي ${daysRemaining} يوماً)
+⚡ نوع التجديد المطلوب: ${planStr}
 
-    window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`, '_blank');
+يرجى تزويدي برقم محفظة زين كاش أو كي كارد لتسديد المبلغ وتفعيل التجديد. شكراً جزيلاً!`;
+
+    window.open(`https://wa.me/${devPhone}?text=${encodeURIComponent(message)}`, '_blank');
   };
 
   // تصدير نسخة احتياطية من قاعدة البيانات أوفلاين
@@ -156,6 +161,23 @@ export const SaaSScreen: FC<SaaSScreenProps> = ({ settings, onUpdateSettings }) 
           <span>الاشتراك ساري: متبقي {daysRemaining} يوماً</span>
         </div>
       </div>
+
+      {/* تنبيه انتهاء الاشتراك قبل 5 أيام */}
+      {daysRemaining <= 5 && (
+        <div className="bg-gradient-to-r from-amber-950/80 to-slate-900 border-2 border-amber-500 rounded-2xl p-4 text-amber-300 flex items-start gap-3 shadow-xl animate-pulse">
+          <div className="p-2 rounded-xl bg-amber-500/20 text-amber-400 flex-shrink-0">
+            <AlertCircle className="w-6 h-6" />
+          </div>
+          <div className="flex-1">
+            <h4 className="font-black text-sm text-white flex items-center gap-2">
+              <span>⚠️ تنبيه مهم جداً: ينتهي اشتراك منظومة المولدات بعد {daysRemaining} {daysRemaining === 1 ? 'يوم واحد' : 'أيام'}!</span>
+            </h4>
+            <p className="text-xs text-amber-200/90 mt-1 leading-relaxed">
+              تاريخ الانتهاء هو <strong>{settings?.expiresAt ? new Date(settings.expiresAt).toLocaleDateString('ar-IQ') : ''}</strong>. يرجى إرسال طلب التجديد للمطور لتفادي إيقاف المنظومة والمزامنة السحابية.
+            </p>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         
@@ -273,7 +295,7 @@ export const SaaSScreen: FC<SaaSScreenProps> = ({ settings, onUpdateSettings }) 
                 }`}
               >
                 <span className="text-xs font-bold block">اشتراك شهري</span>
-                <span className="text-sm font-black text-amber-400 block mt-1">20,000 د.ع</span>
+                <span className="text-sm font-black text-amber-400 block mt-1">15,000 د.ع</span>
                 <span className="text-[10px] text-slate-400 block">لكل شهر</span>
               </div>
 
@@ -285,11 +307,11 @@ export const SaaSScreen: FC<SaaSScreenProps> = ({ settings, onUpdateSettings }) 
                     : 'bg-slate-950/70 border-slate-800 text-slate-400'
                 }`}
               >
-                <div className="absolute top-0 left-0 bg-emerald-600 text-[9px] text-white px-2 py-0.2 rounded-br font-bold">
-                  توفير شهرين
+                <div className="absolute top-0 left-0 bg-emerald-600 text-[9px] text-white px-2 py-0.5 rounded-br font-bold">
+                  خصم شهرين (توفير 30,000 د.ع)
                 </div>
                 <span className="text-xs font-bold block mt-1">اشتراك سنوي</span>
-                <span className="text-sm font-black text-amber-400 block mt-1">180,000 د.ع</span>
+                <span className="text-sm font-black text-amber-400 block mt-1">150,000 د.ع</span>
                 <span className="text-[10px] text-slate-400 block">لسنة كاملة</span>
               </div>
             </div>
@@ -300,7 +322,7 @@ export const SaaSScreen: FC<SaaSScreenProps> = ({ settings, onUpdateSettings }) 
                 طريقة التفعيل وتجديد الاشتراك:
               </span>
               <p className="text-[11px] text-slate-300 leading-relaxed">
-                يتم استلام مبالغ الاشتراك وتفعيل المنظومة يدوياً عبر التواصل مع إدارة المنصة. وسائل التحويل المعتمدة:
+                يتم استلام مبالغ الاشتراك وتفعيل المنظومة يدوياً عبر التواصل مع إدارة المنصة (المطور). وسائل التحويل المعتمدة:
               </p>
               <div className="flex items-center gap-2 text-xs">
                 <span className="bg-slate-900 border border-slate-800 px-2 py-1 rounded-lg text-slate-200 font-bold">زين كاش (ZainCash)</span>
@@ -309,12 +331,13 @@ export const SaaSScreen: FC<SaaSScreenProps> = ({ settings, onUpdateSettings }) 
               </div>
             </div>
 
-            {/* زر التواصل مع الإدارة للتفعيل */}
+            {/* زر التواصل مع المطور للتفعيل والتجديد */}
             <button
               onClick={handleRequestRenewalWhatsApp}
               className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-black p-3 rounded-xl transition-all text-xs cursor-pointer shadow-lg shadow-emerald-600/20"
             >
-              <span>طلب تجديد الاشتراك عبر واتساب صاحب المنصة</span>
+              <MessageCircle className="w-4 h-4 fill-white" />
+              <span>إرسال طلب التجديد عبر واتساب المطور (07764271130)</span>
             </button>
           </div>
 

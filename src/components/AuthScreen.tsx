@@ -160,7 +160,7 @@ export const AuthScreen: FC<AuthScreenProps> = ({ onLoginSuccess }) => {
         phone: phoneClean,
         address: `${regCity} - ${regAddress.trim() || 'العراق'}`,
         plan: regPlan,
-        planPrice: regPlan === 'yearly' ? 180000 : 20000,
+        planPrice: regPlan === 'yearly' ? 150000 : 15000,
         subscriptionStatus: 'pending_activation', // بانتظار تفعيل صاحب المنصة
         isBlocked: false,
         expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
@@ -307,7 +307,7 @@ export const AuthScreen: FC<AuthScreenProps> = ({ onLoginSuccess }) => {
               <input
                 type="text"
                 required
-                placeholder="مثال: 07701234567 أو admin"
+                placeholder="أدخل رقم الهاتف أو اسم المستخدم"
                 value={loginUsername}
                 onChange={(e) => setLoginUsername(e.target.value)}
                 className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-amber-500 transition-colors"
@@ -337,10 +337,6 @@ export const AuthScreen: FC<AuthScreenProps> = ({ onLoginSuccess }) => {
               <span>{isLoading ? 'جاري التحقق والدخول...' : 'تسجيل الدخول للنظام'}</span>
               <ArrowLeft className="w-4 h-4" />
             </button>
-
-            <div className="mt-4 p-3 bg-slate-950/60 rounded-xl border border-slate-800 text-[11px] text-slate-400 text-center">
-              💡 <strong>ملاحظة لمدير المنصة:</strong> حساب الإدارة الافتراضي هو المستخدم <code className="text-amber-400 font-mono">admin</code> وكلمة السر <code className="text-amber-400 font-mono">admin123</code>.
-            </div>
           </form>
         )}
 
@@ -476,7 +472,7 @@ export const AuthScreen: FC<AuthScreenProps> = ({ onLoginSuccess }) => {
                       className="accent-amber-500"
                     />
                   </div>
-                  <strong className="text-amber-400 text-sm mt-1">20,000 د.ع</strong>
+                  <strong className="text-amber-400 text-sm mt-1">15,000 د.ع</strong>
                 </label>
 
                 <label
@@ -487,7 +483,7 @@ export const AuthScreen: FC<AuthScreenProps> = ({ onLoginSuccess }) => {
                   }`}
                 >
                   <div className="flex items-center justify-between">
-                    <span className="font-bold text-emerald-400">سنوي (توفير)</span>
+                    <span className="font-bold text-emerald-400">سنوي (خصم شهرين)</span>
                     <input
                       type="radio"
                       name="plan"
@@ -496,7 +492,7 @@ export const AuthScreen: FC<AuthScreenProps> = ({ onLoginSuccess }) => {
                       className="accent-amber-500"
                     />
                   </div>
-                  <strong className="text-amber-400 text-sm mt-1">180,000 د.ع</strong>
+                  <strong className="text-amber-400 text-sm mt-1">150,000 د.ع</strong>
                 </label>
               </div>
             </div>
