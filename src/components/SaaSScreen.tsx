@@ -1,5 +1,6 @@
 import { useState, type FC } from 'react';
 import { db } from '../db/db';
+import { supabase } from '../services/supabaseClient';
 import { bluetoothPrinter } from '../services/bluetoothPrinter';
 import type { TenantSettings } from '../types';
 import {
@@ -33,7 +34,6 @@ export const SaaSScreen: FC<SaaSScreenProps> = ({ settings, onUpdateSettings }) 
   
   const [isSaved, setIsSaved] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<'monthly' | 'yearly'>('monthly');
-  const [paymentSuccessMsg, setPaymentSuccessMsg] = useState<string | null>(null);
 
   // إعدادات الطابعة الحرارية والشبكة
   const [isTestPrinting, setIsTestPrinting] = useState(false);
@@ -79,35 +79,36 @@ export const SaaSScreen: FC<SaaSScreenProps> = ({ settings, onUpdateSettings }) 
     };
 
     await db.settings.put(updated);
+    if (navigator.onLine) {
+      await supabase.from('tenants').update({
+        generator_name: generatorName,
+        owner_name: ownerName,
+        phone,
+        address,
+        auto_send_whatsapp: autoSendWhatsapp,
+      }).eq('id', settings.id);
+    }
     onUpdateSettings(updated);
     setIsSaved(true);
     setTimeout(() => setIsSaved(false), 3000);
   };
 
-  // محاكاة تجديد اشتراك الـ SaaS
-  const handleRenewSubscription = async (method: 'zaincash' | 'qicard' | 'code') => {
-    if (!settings) return;
+  // طلب تجديد أو تفعيل الاشتراك عبر واتساب مدير المنصة
+  const handleRequestRenewalWhatsApp = () => {
+    const adminPhone = localStorage.getItem('platform_admin_phone') || '07701234567';
+    let cleanPhone = adminPhone.trim().replace(/\s+/g, '').replace(/-/g, '');
+    if (cleanPhone.startsWith('07')) {
+      cleanPhone = '964' + cleanPhone.substring(1);
+    }
 
-    const daysToAdd = selectedPlan === 'yearly' ? 365 : 30;
-    const currentExpiry = new Date(settings.expiresAt > new Date().toISOString() ? settings.expiresAt : new Date());
-    currentExpiry.setDate(currentExpiry.getDate() + daysToAdd);
+    const planStr = selectedPlan === 'yearly' ? 'السنوي (180,000 د.ع)' : 'الشهري (20,000 د.ع)';
+    const message = `السلام عليكم ورحمة الله،
+أنا الأخ ${ownerName} صاحب (${generatorName}).
+رقم الهاتف المسجل: ${phone}
+أرغب بـ تفعيل/تجديد اشتراك المنظومة للاشتراك ${planStr}.
+يرجى تزويدي برقم محفظة زين كاش أو كي كارد لتسديد المبلغ وتفعيل الحساب. شكراً جزيلاً!`;
 
-    const updated: TenantSettings = {
-      ...settings,
-      plan: selectedPlan,
-      subscriptionStatus: 'active',
-      expiresAt: currentExpiry.toISOString(),
-    };
-
-    await db.settings.put(updated);
-    onUpdateSettings(updated);
-
-    const costStr = selectedPlan === 'yearly' ? '180,000 د.ع (سنوي)' : '20,000 د.ع (شهري)';
-    setPaymentSuccessMsg(
-      `تم استلام الدفعة وتمديد اشتراك المنظومة بنجاح لمدة ${daysToAdd} يوماً عبر ${
-        method === 'zaincash' ? 'زين كاش' : method === 'qicard' ? 'كي كارد' : 'كود التفعيل'
-      } بقيمة ${costStr}.`
-    );
+    window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`, '_blank');
   };
 
   // تصدير نسخة احتياطية من قاعدة البيانات أوفلاين
@@ -293,49 +294,28 @@ export const SaaSScreen: FC<SaaSScreenProps> = ({ settings, onUpdateSettings }) 
               </div>
             </div>
 
-            {/* وسائل الدفع المعتمدة في العراق */}
-            <div className="space-y-2">
-              <span className="text-xs font-semibold text-slate-300 block">اختر وسيلة الدفع:</span>
-              
-              <button
-                onClick={() => handleRenewSubscription('zaincash')}
-                className="w-full flex items-center justify-between bg-slate-950 hover:bg-slate-900 border border-slate-700 hover:border-amber-500 p-2.5 rounded-xl transition-all text-xs text-right cursor-pointer"
-              >
-                <div className="flex items-center gap-2">
-                  <div className="w-7 h-7 rounded-lg bg-red-600 text-white font-black flex items-center justify-center text-[10px]">
-                    Zain
-                  </div>
-                  <div>
-                    <span className="font-bold text-white block">الدفع عبر زين كاش (ZainCash)</span>
-                    <span className="text-[10px] text-slate-400">محفظة الهاتف الفورية</span>
-                  </div>
-                </div>
-                <span className="text-xs text-amber-400 font-bold">تجديد</span>
-              </button>
-
-              <button
-                onClick={() => handleRenewSubscription('qicard')}
-                className="w-full flex items-center justify-between bg-slate-950 hover:bg-slate-900 border border-slate-700 hover:border-amber-500 p-2.5 rounded-xl transition-all text-xs text-right cursor-pointer"
-              >
-                <div className="flex items-center gap-2">
-                  <div className="w-7 h-7 rounded-lg bg-amber-600 text-white font-black flex items-center justify-center text-[10px]">
-                    Qi
-                  </div>
-                  <div>
-                    <span className="font-bold text-white block">الدفع عبر كي كارد (Qi / SuperQi)</span>
-                    <span className="text-[10px] text-slate-400">بطاقات الماستركارد العراقية</span>
-                  </div>
-                </div>
-                <span className="text-xs text-amber-400 font-bold">تجديد</span>
-              </button>
+            {/* وسائل الدفع المعتمدة وطريقة التفعيل */}
+            <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 space-y-2.5">
+              <span className="text-xs font-bold text-amber-400 block">
+                طريقة التفعيل وتجديد الاشتراك:
+              </span>
+              <p className="text-[11px] text-slate-300 leading-relaxed">
+                يتم استلام مبالغ الاشتراك وتفعيل المنظومة يدوياً عبر التواصل مع إدارة المنصة. وسائل التحويل المعتمدة:
+              </p>
+              <div className="flex items-center gap-2 text-xs">
+                <span className="bg-slate-900 border border-slate-800 px-2 py-1 rounded-lg text-slate-200 font-bold">زين كاش (ZainCash)</span>
+                <span className="bg-slate-900 border border-slate-800 px-2 py-1 rounded-lg text-slate-200 font-bold">كي كارد (Qi Card)</span>
+                <span className="bg-slate-900 border border-slate-800 px-2 py-1 rounded-lg text-slate-200 font-bold">نقداً</span>
+              </div>
             </div>
 
-            {paymentSuccessMsg && (
-              <div className="mt-3 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 p-2.5 rounded-xl text-xs flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
-                <span>{paymentSuccessMsg}</span>
-              </div>
-            )}
+            {/* زر التواصل مع الإدارة للتفعيل */}
+            <button
+              onClick={handleRequestRenewalWhatsApp}
+              className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-black p-3 rounded-xl transition-all text-xs cursor-pointer shadow-lg shadow-emerald-600/20"
+            >
+              <span>طلب تجديد الاشتراك عبر واتساب صاحب المنصة</span>
+            </button>
           </div>
 
           {/* زر النسخ الاحتياطي اليدوي للأمان */}

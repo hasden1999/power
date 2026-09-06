@@ -10,6 +10,7 @@ import { SaaSScreen } from './components/SaaSScreen';
 import { AuthScreen } from './components/AuthScreen';
 import { SuperAdminScreen } from './components/SuperAdminScreen';
 import { InstallModal } from './components/InstallModal';
+import { SubscriptionStatusScreen } from './components/SubscriptionStatusScreen';
 import type { TenantSettings, UserAccount } from './types';
 
 export function App() {
@@ -107,7 +108,36 @@ export function App() {
     );
   }
 
-  // 3. شاشة تطبيق المولدة (المستأجر)
+  // 3. التحقق من صلاحية اشتراك المولدة (إذا كان معلقاً، أو منتهياً، أو محظوراً)
+  const refreshTenantData = async () => {
+    if (currentUser?.tenantId) {
+      const updated = await db.settings.get(currentUser.tenantId);
+      if (updated) {
+        setCurrentTenant(updated);
+      }
+    }
+  };
+
+  const isBlocked = Boolean(activeSettings?.isBlocked);
+  const isPending = activeSettings?.subscriptionStatus === 'pending_activation';
+  const isExpired = Boolean(
+    activeSettings?.expiresAt && new Date(activeSettings.expiresAt) <= new Date()
+  );
+
+  const isLocked = !impersonatedTenant && (isBlocked || isPending || isExpired);
+
+  if (isLocked && activeSettings && currentUser.role !== 'super_admin') {
+    return (
+      <SubscriptionStatusScreen
+        tenant={activeSettings}
+        user={currentUser}
+        onLogout={handleLogout}
+        onRefreshTenant={refreshTenantData}
+      />
+    );
+  }
+
+  // 4. شاشة تطبيق المولدة (المستأجر بعد التفعيل)
   const tenantId = activeSettings?.id || 'tenant-01';
 
   return (
