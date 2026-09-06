@@ -4,6 +4,7 @@ import { Zap, Wifi, WifiOff, RefreshCw, Users, DollarSign, Calendar, Settings, L
 
 import type { SyncStatusInfo } from '../services/syncService';
 import type { UserAccount } from '../types';
+import { APP_VERSION, forceReloadAndClearCache } from '../services/appUpdater';
 
 interface NavbarProps {
   currentTab: 'collection' | 'subscribers' | 'pricing' | 'expenses' | 'saas';
@@ -140,6 +141,15 @@ export const Navbar: FC<NavbarProps> = ({
 
         {/* مؤشر الاتصال والمزامنة وقائمة المستخدم */}
         <div className="flex items-center gap-2 sm:gap-3">
+          <button
+            onClick={forceReloadAndClearCache}
+            className="flex items-center gap-1 bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-amber-400 border border-slate-800 px-2 py-1.5 rounded-xl text-[11px] font-mono font-bold transition-all cursor-pointer"
+            title="تحديث فوري للمنظومة وتفريغ الكاش (Cache Buster)"
+          >
+            <RefreshCw className="w-3 h-3 text-amber-400" />
+            <span>{APP_VERSION}</span>
+          </button>
+
           {onOpenInstall && (
             <button
               onClick={onOpenInstall}

@@ -19,8 +19,10 @@ import {
   MessageCircle,
   Clock,
   Upload,
-  Database
+  Database,
+  RefreshCw
 } from 'lucide-react';
+import { APP_VERSION, forceReloadAndClearCache } from '../services/appUpdater';
 
 
 interface SaaSScreenProps {
@@ -669,6 +671,32 @@ export const SaaSScreen: FC<SaaSScreenProps> = ({ settings, onUpdateSettings }) 
           <div className="text-[11px] text-slate-400 bg-slate-950/60 p-2.5 rounded-xl border border-slate-800">
             🔒 <strong>تلميح أمني:</strong> يُنصح بتنزيل نسخة احتياطية أسبوعياً أو عند نهاية كل دورة جباية شهرية والاحتفاظ بها على هاتفك أو إرسالها لبريدك الإلكتروني الشخصي.
           </div>
+        </div>
+
+        {/* بطاقة تحديث النظام وتفريغ الذاكرة المؤقتة (PWA Cache Buster) */}
+        <div className="bg-slate-800/90 border border-slate-700 rounded-2xl p-5 shadow-lg space-y-3">
+          <div className="flex items-center justify-between border-b border-slate-700/80 pb-3">
+            <h3 className="font-bold text-sm text-white flex items-center gap-2">
+              <RefreshCw className="w-4 h-4 text-amber-400" />
+              <span>تحديث المنظومة وتفريغ الذاكرة المؤقتة (الإصدار {APP_VERSION})</span>
+            </h3>
+            <span className="text-[11px] bg-slate-900 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded-full font-mono font-bold">
+              {APP_VERSION}
+            </span>
+          </div>
+
+          <p className="text-xs text-slate-300 leading-relaxed">
+            إذا قمت بفتح المنظومة ولم تظهر لك أحدث الميزات المضافة، اضغط على الزر أدناه لتفريغ ذاكرة المتصفح وتنزيل أحدث ملفات النظام فوراً.
+          </p>
+
+          <button
+            type="button"
+            onClick={forceReloadAndClearCache}
+            className="flex items-center justify-center gap-2 w-full bg-slate-900 hover:bg-slate-800 active:scale-95 text-amber-400 border border-amber-500/30 font-bold py-3 px-4 rounded-xl text-xs sm:text-sm transition-all cursor-pointer"
+          >
+            <RefreshCw className="w-4 h-4 text-amber-400" />
+            <span>تحديث المنظومة الآن ومسح الكاش</span>
+          </button>
         </div>
 
       </div>
