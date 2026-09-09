@@ -1,6 +1,7 @@
 import { useState, type FC, type FormEvent } from 'react';
 import { db } from '../db/db';
 import { supabase } from '../services/supabaseClient';
+import { hashPassword, verifyPassword, isPasswordHashed } from '../services/authSecurity';
 import type { UserAccount, TenantSettings } from '../types';
 import { Zap, Lock, Phone, User, Building, MapPin, CheckCircle2, ShieldCheck, ArrowLeft } from 'lucide-react';
 
@@ -45,49 +46,66 @@ export const AuthScreen: FC<AuthScreenProps> = ({ onLoginSuccess }) => {
           .eq('username', usernameClean)
           .maybeSingle();
 
-        if (cloudUser && cloudUser.password === passwordClean) {
-          const appUser: UserAccount = {
-            id: cloudUser.id,
-            username: cloudUser.username,
-            password: cloudUser.password,
-            fullName: cloudUser.full_name,
-            role: cloudUser.role,
-            tenantId: cloudUser.tenant_id || undefined,
-            createdAt: cloudUser.created_at,
-          };
-          await db.users.put(appUser);
-
-          let appTenant: TenantSettings | undefined;
-          if (cloudUser.tenant_id) {
-            const { data: cloudTenant } = await supabase
-              .from('tenants')
-              .select('*')
-              .eq('id', cloudUser.tenant_id)
-              .maybeSingle();
-
-            if (cloudTenant) {
-              appTenant = {
-                id: cloudTenant.id,
-                generatorName: cloudTenant.generator_name,
-                ownerName: cloudTenant.owner_name,
-                phone: cloudTenant.phone || '',
-                address: cloudTenant.address || '',
-                plan: cloudTenant.plan || 'monthly',
-                planPrice: Number(cloudTenant.plan_price) || 0,
-                subscriptionStatus: cloudTenant.subscription_status || 'active',
-                isBlocked: Boolean(cloudTenant.is_blocked),
-                expiresAt: cloudTenant.expires_at,
-                autoSendWhatsapp: Boolean(cloudTenant.auto_send_whatsapp),
-                defaultPriceNormal: Number(cloudTenant.default_price_normal) || 0,
-                defaultPriceGold: Number(cloudTenant.default_price_gold) || 0,
-                createdAt: cloudTenant.created_at,
-              };
-              await db.settings.put(appTenant);
+        if (cloudUser) {
+          const isValid = await verifyPassword(passwordClean, cloudUser.password);
+          if (isValid) {
+            let activePassword = cloudUser.password;
+            // ترقية أمنية تلقائية لكلمة المرور إذا كانت مسجلة بالنص الصريح القديم
+            if (!isPasswordHashed(cloudUser.password)) {
+              try {
+                activePassword = await hashPassword(passwordClean);
+                await supabase
+                  .from('users')
+                  .update({ password: activePassword })
+                  .eq('id', cloudUser.id);
+              } catch (upgErr) {
+                console.warn('تعذر ترقية كلمة المرور في السحابة حالياً:', upgErr);
+              }
             }
-          }
 
-          onLoginSuccess(appUser, appTenant);
-          return;
+            const appUser: UserAccount = {
+              id: cloudUser.id,
+              username: cloudUser.username,
+              password: activePassword,
+              fullName: cloudUser.full_name,
+              role: cloudUser.role,
+              tenantId: cloudUser.tenant_id || undefined,
+              createdAt: cloudUser.created_at,
+            };
+            await db.users.put(appUser);
+
+            let appTenant: TenantSettings | undefined;
+            if (cloudUser.tenant_id) {
+              const { data: cloudTenant } = await supabase
+                .from('tenants')
+                .select('*')
+                .eq('id', cloudUser.tenant_id)
+                .maybeSingle();
+
+              if (cloudTenant) {
+                appTenant = {
+                  id: cloudTenant.id,
+                  generatorName: cloudTenant.generator_name,
+                  ownerName: cloudTenant.owner_name,
+                  phone: cloudTenant.phone || '',
+                  address: cloudTenant.address || '',
+                  plan: cloudTenant.plan || 'monthly',
+                  planPrice: Number(cloudTenant.plan_price) || 0,
+                  subscriptionStatus: cloudTenant.subscription_status || 'active',
+                  isBlocked: Boolean(cloudTenant.is_blocked),
+                  expiresAt: cloudTenant.expires_at,
+                  autoSendWhatsapp: Boolean(cloudTenant.auto_send_whatsapp),
+                  defaultPriceNormal: Number(cloudTenant.default_price_normal) || 0,
+                  defaultPriceGold: Number(cloudTenant.default_price_gold) || 0,
+                  createdAt: cloudTenant.created_at,
+                };
+                await db.settings.put(appTenant);
+              }
+            }
+
+            onLoginSuccess(appUser, appTenant);
+            return;
+          }
         }
       }
 
@@ -97,12 +115,26 @@ export const AuthScreen: FC<AuthScreenProps> = ({ onLoginSuccess }) => {
         .equals(usernameClean)
         .first();
 
-      if (localUser && localUser.password === passwordClean) {
-        const localTenant = localUser.tenantId
-          ? await db.settings.get(localUser.tenantId)
-          : undefined;
-        onLoginSuccess(localUser, localTenant);
-        return;
+      if (localUser) {
+        const isLocalValid = await verifyPassword(passwordClean, localUser.password);
+        if (isLocalValid) {
+          // ترقية كلمة المرور المحلية إذا كانت غير مشفرة
+          if (!isPasswordHashed(localUser.password)) {
+            try {
+              const hashedLocal = await hashPassword(passwordClean);
+              await db.users.update(localUser.id, { password: hashedLocal });
+              localUser.password = hashedLocal;
+            } catch (localUpgErr) {
+              console.warn('تعذر ترقية كلمة المرور محلياً:', localUpgErr);
+            }
+          }
+
+          const localTenant = localUser.tenantId
+            ? await db.settings.get(localUser.tenantId)
+            : undefined;
+          onLoginSuccess(localUser, localTenant);
+          return;
+        }
       }
 
       setErrorMessage('رقم الهاتف / اسم المستخدم أو كلمة المرور غير صحيحة');
@@ -173,10 +205,12 @@ export const AuthScreen: FC<AuthScreenProps> = ({ onLoginSuccess }) => {
         createdAt: new Date().toISOString(),
       };
 
+      const hashedPassword = await hashPassword(regPassword.trim());
+
       const newUser: UserAccount = {
         id: newUserId,
         username: phoneClean,
-        password: regPassword.trim(),
+        password: hashedPassword,
         fullName: regOwnerName.trim() || regGenName.trim(),
         role: 'tenant_owner',
         tenantId: newTenantId,

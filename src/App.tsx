@@ -28,6 +28,14 @@ export function App() {
   const [isInitialized, setIsInitialized] = useState(false);
   const [isInstallOpen, setIsInstallOpen] = useState(false);
   const [isQuickActionOpen, setIsQuickActionOpen] = useState(false);
+  const [updateAvailable, setUpdateAvailable] = useState(false);
+
+  // الاستماع لحدث توفر تحديث جديد لتنبيه المستخدم بسلاسة دون مقاطعة
+  useEffect(() => {
+    const onUpdateReady = () => setUpdateAvailable(true);
+    window.addEventListener('app-update-ready', onUpdateReady);
+    return () => window.removeEventListener('app-update-ready', onUpdateReady);
+  }, []);
 
   // جلب إعدادات المولدة الحالية المسجل الدخول بها
   const activeTenantId = impersonatedTenant?.id || currentTenant?.id || '';
@@ -216,6 +224,22 @@ export function App() {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-amber-500 selection:text-slate-950">
       
+      {/* شريط تحديث المنظومة غير المتطفل عند توفر إصدار أحدث */}
+      {updateAvailable && (
+        <div className="bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-600 text-white px-4 py-2.5 shadow-xl flex flex-col sm:flex-row items-center justify-between gap-3 text-xs sm:text-sm font-bold z-50 border-b border-emerald-400 animate-in fade-in">
+          <div className="flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-emerald-200 animate-pulse"></span>
+            <span>⚡ يتوفر إصدار جديد ومحدث من المنظومة، يمكنك التحديث فور إنهاء عملك:</span>
+          </div>
+          <button
+            onClick={() => window.location.reload()}
+            className="bg-white text-emerald-900 px-4 py-1.5 rounded-xl text-xs font-black shadow hover:bg-emerald-50 transition cursor-pointer flex-shrink-0"
+          >
+            تحديث المنظومة الآن 🔄
+          </button>
+        </div>
+      )}
+
       {/* شريط التنقل العلوي */}
       <Navbar
         currentTab={currentTab}

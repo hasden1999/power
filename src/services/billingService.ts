@@ -1,10 +1,20 @@
 import { db } from '../db/db';
 import type { Subscriber, BillingCycle, Invoice, Payment } from '../types';
 
+/**
+ * تقريب وضبط المبالغ المالية بالدينار العراقي كأعداد صحيحة موجبة
+ * يمنع مشاكل الفاصلة العائمة والكسور غير المنطقية
+ */
+export function roundIQD(amount: number): number {
+  if (typeof amount !== 'number' || isNaN(amount) || !isFinite(amount)) return 0;
+  return Math.max(0, Math.round(amount));
+}
+
 export function formatIQD(amount: number): string {
+  const safeAmount = roundIQD(amount);
   return new Intl.NumberFormat('ar-IQ', {
     maximumFractionDigits: 0,
-  }).format(amount) + ' د.ع';
+  }).format(safeAmount) + ' د.ع';
 }
 
 // حساب سعر الأمبير للمشترك بناءً على نوع اشتراكه
@@ -112,6 +122,13 @@ export async function recordPayment(params: {
 }): Promise<Payment> {
   const { tenantId, subscriberId, invoiceId, amount, collectorName, notes } = params;
 
+  const cleanAmount = roundIQD(amount);
+  if (cleanAmount <= 0) {
+    throw new Error('مبلغ السند غير صالح، يجب إدخال قيمة أكبر من الصفر');
+  }
+
+  const cleanCollector = (collectorName || 'الجابي').trim().slice(0, 80);
+  const cleanNotes = notes ? notes.trim().slice(0, 300) : undefined;
   const paymentNumber = 'REC-' + Math.floor(100000 + Math.random() * 900000);
 
   const payment: Payment = {
@@ -119,10 +136,10 @@ export async function recordPayment(params: {
     tenantId,
     subscriberId,
     invoiceId,
-    amount,
+    amount: cleanAmount,
     paymentDate: new Date().toISOString(),
-    collectorName,
-    notes,
+    collectorName: cleanCollector,
+    notes: cleanNotes,
     syncStatus: navigator.onLine ? 'synced' : 'pending',
     receiptNumber: paymentNumber,
   };
@@ -133,7 +150,7 @@ export async function recordPayment(params: {
   if (invoiceId) {
     const invoice = await db.invoices.get(invoiceId);
     if (invoice) {
-      const newTotalPaid = (invoice.totalPaid || 0) + amount;
+      const newTotalPaid = (invoice.totalPaid || 0) + cleanAmount;
       const newStatus =
         newTotalPaid >= invoice.totalDue
           ? 'paid'

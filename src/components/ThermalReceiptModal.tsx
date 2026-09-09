@@ -172,31 +172,45 @@ export const ThermalReceiptModal: FC<ThermalReceiptModalProps> = ({
         {/* أزرار العمليات السريعة للطباعة والواتساب */}
         <div className="p-3 bg-slate-950/90 border-t border-slate-800 space-y-2">
           
-          {/* خيارات الطباعة المباشرة */}
-          <div className="grid grid-cols-2 gap-2">
-            
-            {/* زر طباعة البلوتوث المباشرة */}
-            <button
-              onClick={handleBluetoothPrint}
-              disabled={isBluetoothPrinting}
-              className="flex items-center justify-center gap-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold py-2.5 px-3 rounded-xl shadow-lg shadow-blue-600/20 text-xs transition-all cursor-pointer"
-              title="الاتصال المباشر بطابعة البلوتوث المحمولة والطباعة الفورية"
-            >
-              <Bluetooth className={`w-4 h-4 ${isBluetoothPrinting ? 'animate-bounce' : ''}`} />
-              <span>{isBluetoothPrinting ? 'جاري الإرسال...' : 'طباعة بلوتوث فورية'}</span>
-            </button>
+          {/* خيارات الطباعة المباشرة والتوافقية مع الأجهزة المختلفة */}
+          {bluetoothPrinter.isSupported() ? (
+            <div className="grid grid-cols-2 gap-2">
+              {/* زر طباعة البلوتوث المباشرة */}
+              <button
+                onClick={handleBluetoothPrint}
+                disabled={isBluetoothPrinting}
+                className="flex items-center justify-center gap-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold py-2.5 px-3 rounded-xl shadow-lg shadow-blue-600/20 text-xs transition-all cursor-pointer"
+                title="الاتصال المباشر بطابعة البلوتوث المحمولة والطباعة الفورية"
+              >
+                <Bluetooth className={`w-4 h-4 ${isBluetoothPrinting ? 'animate-bounce' : ''}`} />
+                <span>{isBluetoothPrinting ? 'جاري الإرسال...' : 'طباعة بلوتوث'}</span>
+              </button>
 
-            {/* زر طباعة النظام (USB / واي فاي / المتصفح) */}
-            <button
-              onClick={handlePrint}
-              className="flex items-center justify-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-white font-bold py-2.5 px-3 rounded-xl border border-slate-700 text-xs transition-all cursor-pointer"
-              title="الطباعة عبر نافذة المتصفح لأي طابعة حرارية معرفة"
-            >
-              <Printer className="w-4 h-4 text-amber-400" />
-              <span>طباعة النظام (حرارية)</span>
-            </button>
-
-          </div>
+              {/* زر طباعة النظام (USB / واي فاي / المتصفح) */}
+              <button
+                onClick={handlePrint}
+                className="flex items-center justify-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-white font-bold py-2.5 px-3 rounded-xl border border-slate-700 text-xs transition-all cursor-pointer"
+                title="الطباعة عبر نافذة المتصفح لأي طابعة حرارية معرفة"
+              >
+                <Printer className="w-4 h-4 text-amber-400" />
+                <span>طباعة النظام (حرارية)</span>
+              </button>
+            </div>
+          ) : (
+            <div>
+              <button
+                onClick={handlePrint}
+                className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black py-2.5 px-4 rounded-xl shadow-lg text-xs transition-all cursor-pointer"
+                title="الطباعة المباشرة عبر متصفح جهازك (يدعم iPhone، AirPrint، USB، وحفظ PDF)"
+              >
+                <Printer className="w-4 h-4" />
+                <span>طباعة السند (AirPrint / حرارية / PDF)</span>
+              </button>
+              <p className="text-[10px] text-slate-400 text-center mt-1">
+                💡 متوافق تماماً مع أجهزة iOS/iPhone وطابعات الشبكة والـ PDF
+              </p>
+            </div>
+          )}
 
           {/* زر إرسال واتساب */}
           <button

@@ -3,14 +3,11 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
 
-// فرض تحديث فوري وإعادة تحميل الصفحة بمجرد تفعيل التحديث الجديد
+// إدارة تحديثات المنظومة وسيرفس وركر دون مقاطعة إدخال بيانات المستخدم
 if ('serviceWorker' in navigator) {
-  let refreshing = false;
   navigator.serviceWorker.addEventListener('controllerchange', () => {
-    if (!refreshing) {
-      refreshing = true;
-      window.location.reload();
-    }
+    // إرسال حدث مخصص للمتصفح لإعلام واجهة المستخدم بوجود تحديث جديد
+    window.dispatchEvent(new CustomEvent('app-update-ready'));
   });
 
   navigator.serviceWorker.ready.then((reg) => {

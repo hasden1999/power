@@ -4,6 +4,7 @@ import { db } from '../db/db';
 import { supabase } from '../services/supabaseClient';
 import { syncAllWithCloud } from '../services/syncService';
 import { formatIQD } from '../services/billingService';
+import { hashPassword } from '../services/authSecurity';
 import type { TenantSettings } from '../types';
 import {
   Building2,
@@ -226,16 +227,19 @@ export const SuperAdminScreen: FC<SuperAdminScreenProps> = ({
     const newPass = prompt(`أدخل رمز الدخول (كلمة المرور) الجديد لمولدة (${tenant.generatorName}):`, '123456');
     if (!newPass || !newPass.trim()) return;
 
+    const cleanPass = newPass.trim();
+    const hashedPass = await hashPassword(cleanPass);
+
     if (navigator.onLine) {
       await supabase
         .from('users')
-        .update({ password: newPass.trim() })
+        .update({ password: hashedPass })
         .eq('tenant_id', tenant.id);
     }
 
     const user = await db.users.where('tenantId').equals(tenant.id).first();
     if (user) {
-      await db.users.update(user.id, { password: newPass.trim() });
+      await db.users.update(user.id, { password: hashedPass });
     }
 
     let phone = tenant.phone.trim().replace(/\s+/g, '').replace(/-/g, '');

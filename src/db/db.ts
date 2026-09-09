@@ -1,5 +1,6 @@
 import Dexie, { type Table } from 'dexie';
 import { supabase } from '../services/supabaseClient';
+import { hashPassword, isPasswordHashed } from '../services/authSecurity';
 import type { Subscriber, BillingCycle, Invoice, Payment, TenantSettings, UserAccount, Expense } from '../types';
 
 export interface SyncQueueItem {
@@ -42,11 +43,18 @@ export const db = new GeneratorDatabase();
 
 // دالة تهيئة بيانات منصة الـ SaaS متعددة المستأجرين مع حساب صاحب المنصة
 export async function seedInitialData() {
-  // 1. حساب صاحب المنصة (Super Admin) بتسجيل الدخول الجديد
+  const adminRawPass = 'Qaqaqa12@12';
+  const existingAdmin = await db.users.get('user-super-admin');
+  let adminHashedPass = existingAdmin?.password;
+  if (!adminHashedPass || !isPasswordHashed(adminHashedPass)) {
+    adminHashedPass = await hashPassword(adminRawPass);
+  }
+
+  // 1. حساب صاحب المنصة (Super Admin) بتسجيل الدخول الجديد المحمي بهاش التشفير
   const superAdminUser: UserAccount = {
     id: 'user-super-admin',
     username: 'power',
-    password: 'Qaqaqa12@12',
+    password: adminHashedPass,
     fullName: 'صاحب المنصة',
     role: 'super_admin',
     createdAt: new Date().toISOString(),
@@ -76,7 +84,7 @@ export async function seedInitialData() {
       await supabase.from('users').upsert({
         id: 'user-super-admin',
         username: 'power',
-        password: 'Qaqaqa12@12',
+        password: adminHashedPass,
         full_name: 'صاحب المنصة',
         role: 'super_admin',
         tenant_id: null,
@@ -144,13 +152,14 @@ export async function seedInitialData() {
 
   await db.settings.bulkPut(tenants);
 
-  // حسابات أصحاب المولدات لتسجيل الدخول
+  // حسابات أصحاب المولدات لتسجيل الدخول (محمية بهاش التشفير)
+  const defaultOwnerHashedPass = await hashPassword('123456');
   const generatorUsers: UserAccount[] = [
     superAdminUser,
     {
       id: 'user-baghdad',
       username: '07701234567',
-      password: '123456',
+      password: defaultOwnerHashedPass,
       fullName: 'أبو كرار المنصوري (بغداد)',
       role: 'tenant_owner',
       tenantId: 'tenant-baghdad-01',
@@ -159,7 +168,7 @@ export async function seedInitialData() {
     {
       id: 'user-basra',
       username: '07801234567',
-      password: '123456',
+      password: defaultOwnerHashedPass,
       fullName: 'أبو سجاد البصري (البصرة)',
       role: 'tenant_owner',
       tenantId: 'tenant-basra-02',
@@ -168,7 +177,7 @@ export async function seedInitialData() {
     {
       id: 'user-najaf',
       username: '07719876543',
-      password: '123456',
+      password: defaultOwnerHashedPass,
       fullName: 'أبو مرتضى النجفي (النجف)',
       role: 'tenant_owner',
       tenantId: 'tenant-najaf-03',
