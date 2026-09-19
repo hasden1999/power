@@ -1,5 +1,5 @@
 import type { FC } from 'react';
-import { Zap, Wifi, WifiOff, RefreshCw, Users, DollarSign, Calendar, Settings, LogOut, ArrowRight, Download, TrendingDown } from 'lucide-react';
+import { Zap, Wifi, WifiOff, RefreshCw, Users, DollarSign, Calendar, Settings, LogOut, ArrowRight, Download, TrendingDown, Sun, SunMedium } from 'lucide-react';
 
 
 import type { SyncStatusInfo } from '../services/syncService';
@@ -16,6 +16,8 @@ interface NavbarProps {
   onBackToAdmin?: () => void;
   isImpersonating?: boolean;
   onOpenInstall?: () => void;
+  isSunlightMode?: boolean;
+  onToggleSunlightMode?: () => void;
 }
 
 export const Navbar: FC<NavbarProps> = ({
@@ -28,6 +30,8 @@ export const Navbar: FC<NavbarProps> = ({
   onBackToAdmin,
   isImpersonating,
   onOpenInstall,
+  isSunlightMode,
+  onToggleSunlightMode,
 }) => {
   return (
     <header className="bg-slate-950/90 backdrop-blur-md border-b border-slate-800 sticky top-0 z-40">
@@ -141,6 +145,26 @@ export const Navbar: FC<NavbarProps> = ({
 
         {/* مؤشر الاتصال والمزامنة وقائمة المستخدم */}
         <div className="flex items-center gap-2 sm:gap-3">
+          {/* زر تبديل وضع الإضاءة النهارية للشمس المباشرة */}
+          {onToggleSunlightMode && (
+            <button
+              onClick={onToggleSunlightMode}
+              className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-[11px] font-bold transition-all cursor-pointer ${
+                isSunlightMode
+                  ? 'bg-amber-500 text-slate-950 font-black shadow-md shadow-amber-500/30'
+                  : 'bg-slate-900 hover:bg-slate-800 text-amber-300 border border-slate-800'
+              }`}
+              title={isSunlightMode ? 'العودة للوضع الليلي الفخم' : 'تفعيل وضع النهار عالي التباين للشمس المباشرة'}
+            >
+              {isSunlightMode ? (
+                <Sun className="w-3.5 h-3.5 fill-slate-950 stroke-[2.5]" />
+              ) : (
+                <SunMedium className="w-3.5 h-3.5 text-amber-400" />
+              )}
+              <span className="hidden sm:inline">{isSunlightMode ? 'نهاري' : 'شمس'}</span>
+            </button>
+          )}
+
           <button
             onClick={forceReloadAndClearCache}
             className="flex items-center gap-1 bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-amber-400 border border-slate-800 px-2 py-1.5 rounded-xl text-[11px] font-mono font-bold transition-all cursor-pointer"

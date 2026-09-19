@@ -3,7 +3,14 @@ import { useState, useMemo, type FC } from 'react';
 
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/db';
-import { formatIQD } from '../services/billingService';
+import {
+  formatIQD,
+  roundIQD,
+  calculateUnitPrice,
+  syncSubscriberInvoiceForCurrentCycle,
+  syncAllMissingInvoices,
+  getLatestActiveCycle
+} from '../services/billingService';
 import type { Subscriber, SubscriptionType, Payment, Invoice } from '../types';
 import {
   Plus,
@@ -20,7 +27,8 @@ import {
   Download,
   Upload,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  Zap
 } from 'lucide-react';
 
 
@@ -70,6 +78,51 @@ export const SubscribersScreen: FC<SubscribersScreenProps> = ({ tenantId }) => {
     () => db.invoices.where('tenantId').equals(tenantId).toArray(),
     [tenantId]
   ) || [];
+
+  // جلب أحدث دورة تسعيرة نشطة لحساب تكلفة المشتركين الفورية
+  const latestCycle = useLiveQuery(
+    () => getLatestActiveCycle(tenantId),
+    [tenantId]
+  );
+
+  // خريطة لربط كل مشترك بأحدث فاتورة صادرة له
+  const invoiceMap = useMemo(() => {
+    const map = new Map<string, Invoice>();
+    const sorted = [...invoices].sort((a, b) => {
+      const orderA = (a.year || 0) * 100 + (a.month || 0);
+      const orderB = (b.year || 0) * 100 + (b.month || 0);
+      if (orderA !== orderB) return orderA - orderB;
+      return new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime();
+    });
+    sorted.forEach((inv) => {
+      map.set(inv.subscriberId, inv);
+    });
+    return map;
+  }, [invoices]);
+
+  // احتساب المعاينة المباشرة لتكلفة الاشتراك للشهر الحالي أثناء تعبئة النافذة
+  const currentCyclePreview = useMemo(() => {
+    if (!latestCycle) return null;
+    const ampNum = parseFloat(amperes) || 0;
+    const fixedNum = parseFloat(fixedPrice) || 0;
+    const openBalNum = parseFloat(openingBalance) || 0;
+
+    const mockSub: Partial<Subscriber> = {
+      subscriptionType,
+      fixedPrice: fixedNum,
+      amperes: ampNum,
+    };
+    const unitPrice = calculateUnitPrice(mockSub as Subscriber, latestCycle);
+    const monthlyCost = subscriptionType === 'fixed' ? fixedNum : roundIQD(ampNum * unitPrice);
+    const totalRequired = monthlyCost + openBalNum;
+
+    return {
+      cycleName: `شهر ${latestCycle.month} / ${latestCycle.year}`,
+      unitPrice,
+      monthlyCost,
+      totalRequired,
+    };
+  }, [latestCycle, amperes, fixedPrice, openingBalance, subscriptionType]);
 
 
   // قائمة الأزقة والشوارع الفريدة
@@ -130,7 +183,7 @@ export const SubscribersScreen: FC<SubscribersScreenProps> = ({ tenantId }) => {
     setIsModalOpen(true);
   };
 
-  // حفظ المشترك (إضافة أو تعديل)
+  // حفظ المشترك (إضافة أو تعديل مع مزامنة واحتساب فوري لفاتورة الشهر)
   const handleSaveSubscriber = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!fullName.trim() || !breakerNumber.trim()) {
@@ -141,10 +194,12 @@ export const SubscribersScreen: FC<SubscribersScreenProps> = ({ tenantId }) => {
     const ampNum = parseFloat(amperes) || 1;
     const openBalNum = parseFloat(openingBalance) || 0;
     const fixedNum = fixedPrice ? parseFloat(fixedPrice) : undefined;
+    const now = new Date().toISOString();
 
     if (editingSub) {
       // تعديل
-      await db.subscribers.update(editingSub.id, {
+      const updatedSub: Subscriber = {
+        ...editingSub,
         fullName: fullName.trim(),
         phone: phone.trim(),
         street: street.trim(),
@@ -155,8 +210,26 @@ export const SubscribersScreen: FC<SubscribersScreenProps> = ({ tenantId }) => {
         openingBalance: openBalNum,
         notes: notes.trim() || undefined,
         isActive,
-        updatedAt: new Date().toISOString(),
+        updatedAt: now,
+      };
+
+      await db.subscribers.update(editingSub.id, updatedSub);
+
+      // تسجيل التعديل في طابور المزامنة
+      await db.syncQueue.add({
+        id: `sync-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
+        action: 'update',
+        entity: 'subscribers',
+        entityId: editingSub.id,
+        payload: updatedSub,
+        createdAt: now,
+        attempts: 0,
       });
+
+      // مزامنة فورية واحتساب فوري لفاتورة الدورة الحالية (تعديل عدد الأمبيرات في وسط الشهر)
+      if (isActive) {
+        await syncSubscriberInvoiceForCurrentCycle(updatedSub);
+      }
     } else {
       // إضافة جديد
       const newSub: Subscriber = {
@@ -172,10 +245,27 @@ export const SubscribersScreen: FC<SubscribersScreenProps> = ({ tenantId }) => {
         openingBalance: openBalNum,
         notes: notes.trim() || undefined,
         isActive,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        createdAt: now,
+        updatedAt: now,
       };
+
       await db.subscribers.add(newSub);
+
+      // تسجيل الإضافة في طابور المزامنة
+      await db.syncQueue.add({
+        id: `sync-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
+        action: 'insert',
+        entity: 'subscribers',
+        entityId: newSub.id,
+        payload: newSub,
+        createdAt: now,
+        attempts: 0,
+      });
+
+      // توليد واحتساب فاتورة فورية للشهر الحالي للمشترك الجديد
+      if (isActive) {
+        await syncSubscriberInvoiceForCurrentCycle(newSub);
+      }
     }
 
     setIsModalOpen(false);
@@ -195,10 +285,33 @@ export const SubscribersScreen: FC<SubscribersScreenProps> = ({ tenantId }) => {
 
   // تبديل حالة التفعيل
   const handleToggleActive = async (sub: Subscriber) => {
+    const nextActive = !sub.isActive;
+    const now = new Date().toISOString();
+    const updatedSub: Subscriber = {
+      ...sub,
+      isActive: nextActive,
+      updatedAt: now,
+    };
+
     await db.subscribers.update(sub.id, {
-      isActive: !sub.isActive,
-      updatedAt: new Date().toISOString(),
+      isActive: nextActive,
+      updatedAt: now,
     });
+
+    await db.syncQueue.add({
+      id: `sync-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
+      action: 'update',
+      entity: 'subscribers',
+      entityId: sub.id,
+      payload: updatedSub,
+      createdAt: now,
+      attempts: 0,
+    });
+
+    // إذا تمت إعادة تفعيل المشترك، يتم توليد/تحديث فاتورته فوراً
+    if (nextActive) {
+      await syncSubscriberInvoiceForCurrentCycle(updatedSub);
+    }
   };
 
   // تصدير كشف المشتركين إلى ملف Excel / CSV متوافق 100% مع الحروف العربية
@@ -371,9 +484,13 @@ export const SubscribersScreen: FC<SubscribersScreenProps> = ({ tenantId }) => {
           attempts: 0,
         });
       }
+
+      // مزامنة واحتساب فوري لفواتير الشهر الحالي لجميع المشتركين المستوردين الجدد
+      await syncAllMissingInvoices(tenantId);
+
       setIsImportModalOpen(false);
       setParsedImportSubscribers([]);
-      alert(`تم استيراد ${parsedImportSubscribers.length} مشترك بنجاح!`);
+      alert(`تم استيراد ${parsedImportSubscribers.length} مشترك وتوليد فواتيرهم فوراً بنجاح!`);
     } catch (err) {
       console.error('Import error:', err);
       alert('حدث خطأ أثناء استيراد المشتركين');
@@ -541,17 +658,38 @@ export const SubscribersScreen: FC<SubscribersScreenProps> = ({ tenantId }) => {
                   </div>
                 </div>
 
-                {/* تفاصيل إضافية */}
-                <div className="mt-3 pt-2.5 border-t border-slate-700/60 flex items-center justify-between text-xs text-slate-300">
-                  <span className="bg-slate-900/80 px-2 py-0.5 rounded text-[11px] text-slate-400">
-                    {typeLabel}
-                  </span>
-                  {sub.openingBalance > 0 && (
-                    <span className="text-rose-400 font-semibold">
-                      دين سابق: {formatIQD(sub.openingBalance)}
-                    </span>
-                  )}
-                </div>
+                {/* تفاصيل نوع الاشتراك وتكلفة الشهر الحالي الفورية */}
+                {(() => {
+                  const subInvoice = invoiceMap.get(sub.id);
+                  const currentCost = subInvoice
+                    ? subInvoice.currentAmount
+                    : latestCycle && sub.isActive
+                    ? sub.subscriptionType === 'fixed'
+                      ? sub.fixedPrice || 0
+                      : roundIQD(sub.amperes * calculateUnitPrice(sub, latestCycle))
+                    : 0;
+
+                  return (
+                    <div className="mt-3 pt-2.5 border-t border-slate-700/60 flex items-center justify-between text-xs text-slate-300">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="bg-slate-900/80 px-2 py-0.5 rounded text-[11px] text-slate-400">
+                          {typeLabel}
+                        </span>
+                        {currentCost > 0 && (
+                          <span className="text-amber-400 font-bold bg-amber-500/10 border border-amber-500/25 px-2 py-0.5 rounded text-[11px] flex items-center gap-1">
+                            <Zap className="w-3 h-3 text-amber-400 fill-amber-400" />
+                            <span>اشتراك الشهر: {formatIQD(currentCost)}</span>
+                          </span>
+                        )}
+                      </div>
+                      {sub.openingBalance > 0 && (
+                        <span className="text-rose-400 font-semibold">
+                          دين سابق: {formatIQD(sub.openingBalance)}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {sub.notes && (
                   <p className="text-xs text-slate-500 mt-2 bg-slate-950/40 p-1.5 rounded">
@@ -785,6 +923,37 @@ export const SubscribersScreen: FC<SubscribersScreenProps> = ({ tenantId }) => {
                 </label>
               </div>
 
+              {/* بطاقة المعاينة الفورية لتكلفة الاشتراك للشهر الحالي */}
+              {currentCyclePreview && isActive && (
+                <div className="bg-gradient-to-r from-amber-500/15 via-amber-500/10 to-transparent border border-amber-500/30 rounded-xl p-3 text-xs space-y-1.5 animate-in fade-in">
+                  <div className="flex items-center justify-between text-amber-400 font-bold">
+                    <span className="flex items-center gap-1.5">
+                      <Zap className="w-4 h-4 text-amber-400 fill-amber-400" />
+                      <span>تكلفة الاشتراك الفورية ({currentCyclePreview.cycleName}):</span>
+                    </span>
+                    <span className="text-sm font-black text-amber-300">
+                      {formatIQD(currentCyclePreview.totalRequired)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-slate-400 text-[11px] pt-1 border-t border-amber-500/20">
+                    <span>
+                      {subscriptionType === 'fixed'
+                        ? 'اشتراك مقطوع بسعر ثابت'
+                        : `سعر الأمبير (${formatIQD(currentCyclePreview.unitPrice)}) × ${parseFloat(amperes) || 0} أمبير = ${formatIQD(currentCyclePreview.monthlyCost)}`}
+                    </span>
+                    {parseFloat(openingBalance) > 0 && (
+                      <span className="text-rose-400 font-semibold">
+                        + دين سابق ({formatIQD(parseFloat(openingBalance))})
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-emerald-400 font-medium flex items-center gap-1">
+                    <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                    <span>توليد واحتساب فوري للفاتورة في شاشة التحصيل بمجرد الحفظ دون الحاجة لإعادة التسعير.</span>
+                  </p>
+                </div>
+              )}
+
               <div className="pt-4 border-t border-slate-800 flex gap-2">
                 <button
                   type="submit"
@@ -966,9 +1135,15 @@ const SubscriberStatementModal: FC<{
   payments: Payment[];
   invoices: Invoice[];
 }> = ({ subscriber, onClose, payments, invoices }) => {
-  const totalInvoiced = invoices.reduce((sum, inv) => sum + inv.totalDue, 0) + subscriber.openingBalance;
+  // إجمالي المبالغ المفوترة تاريخياً: مجموع مبالغ الأشهر الفعلية + الرصيد الافتتاحي - مجموع التخفيضات
+  const totalBilled =
+    invoices.length > 0
+      ? invoices.reduce((sum, inv) => sum + inv.currentAmount, 0) +
+        (subscriber.openingBalance || 0) -
+        invoices.reduce((sum, inv) => sum + (inv.discount || 0), 0)
+      : subscriber.openingBalance || 0;
   const totalPaid = payments.reduce((sum, p) => sum + p.amount, 0);
-  const remaining = Math.max(0, totalInvoiced - totalPaid);
+  const remaining = Math.max(0, totalBilled - totalPaid);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-black/80 backdrop-blur-sm animate-in fade-in">
@@ -994,7 +1169,7 @@ const SubscriberStatementModal: FC<{
           <div className="grid grid-cols-3 gap-2 bg-slate-950 p-3 rounded-xl border border-slate-800 text-center">
             <div>
               <span className="text-[11px] text-slate-400 block">إجمالي المطلوب:</span>
-              <span className="font-bold text-sm text-slate-200">{formatIQD(totalInvoiced)}</span>
+              <span className="font-bold text-sm text-slate-200">{formatIQD(totalBilled)}</span>
             </div>
             <div>
               <span className="text-[11px] text-slate-400 block">إجمالي المسدد:</span>

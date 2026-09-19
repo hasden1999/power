@@ -1,7 +1,14 @@
-import { useState, useMemo, type FC } from 'react';
+import { useState, useMemo, useEffect, type FC } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/db';
-import { formatIQD, recordPayment } from '../services/billingService';
+import {
+  formatIQD,
+  recordPayment,
+  roundIQD,
+  calculateUnitPrice,
+  syncSubscriberInvoiceForCurrentCycle,
+  syncAllMissingInvoices
+} from '../services/billingService';
 import { ThermalReceiptModal } from './ThermalReceiptModal';
 import { BottomSheet } from './BottomSheet';
 import { bluetoothPrinter } from '../services/bluetoothPrinter';
@@ -19,7 +26,10 @@ import {
   UserCheck,
   Zap,
   MessageSquare,
-  X
+  X,
+  LayoutGrid,
+  List,
+  Percent
 } from 'lucide-react';
 
 interface CollectionScreenProps {
@@ -36,6 +46,14 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedStreet, setSelectedStreet] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'unpaid' | 'partial' | 'paid'>('all');
+  const [viewMode, setViewMode] = useState<'cards' | 'compact'>(() => {
+    return (localStorage.getItem('collection_view_mode') as 'cards' | 'compact') || 'cards';
+  });
+
+  const handleToggleViewMode = (mode: 'cards' | 'compact') => {
+    setViewMode(mode);
+    localStorage.setItem('collection_view_mode', mode);
+  };
 
   // نوافذ الدفع والتأكيد
   const [payingSub, setPayingSub] = useState<{ sub: Subscriber; invoice?: Invoice } | null>(null);
@@ -64,7 +82,26 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
     () => db.payments.where('tenantId').equals(tenantId).toArray(),
     [tenantId]
   ) || [];
+  const cycles = useLiveQuery(
+    () => db.billingCycles.where('tenantId').equals(tenantId).toArray(),
+    [tenantId]
+  ) || [];
 
+  // أحدث دورة تسعيرة نشطة
+  const latestCycle = useMemo(() => {
+    if (!cycles || cycles.length === 0) return undefined;
+    const sorted = [...cycles].sort((a, b) => (b.year * 100 + b.month) - (a.year * 100 + a.month));
+    return sorted.find((c) => !c.isClosed) || sorted[0];
+  }, [cycles]);
+
+  // فحص ذاتي وتوليد فوري للفواتير المفقودة لأي مشترك جديد أو من تم تعديل أمبيراته
+  useEffect(() => {
+    if (tenantId) {
+      syncAllMissingInvoices(tenantId).catch((err) => {
+        console.warn('فحص الفواتير المفقودة التلقائي:', err);
+      });
+    }
+  }, [tenantId, subscribers.length]);
 
   // قائمة الشوارع الفريدة للفلتر
   const streetsList = useMemo(() => {
@@ -75,15 +112,73 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
     return Array.from(streets);
   }, [subscribers]);
 
-  // ربط الفواتير بالمشتركين
+  // ربط الفواتير بالمشتركين - اعتماد أحدث فاتورة للمشترك دائماً
   const invoiceMap = useMemo(() => {
     const map = new Map<string, Invoice>();
-    invoices.forEach((inv) => {
-      // نأخذ آخر فاتورة للمشترك
+    const sortedInvoices = [...invoices].sort((a, b) => {
+      const orderA = (a.year || 0) * 100 + (a.month || 0);
+      const orderB = (b.year || 0) * 100 + (b.month || 0);
+      if (orderA !== orderB) return orderA - orderB;
+      return new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime();
+    });
+    sortedInvoices.forEach((inv) => {
       map.set(inv.subscriberId, inv);
     });
     return map;
   }, [invoices]);
+
+  // دالة موحدة ودقيقة لاحتساب رصيد واستحقاق المشترك بشكل فوري
+  const getSubscriberBalance = (sub: Subscriber) => {
+    const inv = invoiceMap.get(sub.id);
+    if (inv) {
+      const totalDue = inv.totalDue;
+      const totalPaid = inv.totalPaid || 0;
+      const remaining = Math.max(0, totalDue - totalPaid);
+      return {
+        invoice: inv,
+        totalDue,
+        totalPaid,
+        remaining,
+        isPaid: remaining === 0,
+        isPartial: totalPaid > 0 && remaining > 0,
+        status: inv.status,
+      };
+    }
+
+    // إذا لم تكن الفاتورة محفوظة بعد في جدول الفواتير ولكن توجد دورة تسعيرة نشطة
+    if (latestCycle && sub.isActive) {
+      const unitPrice = calculateUnitPrice(sub, latestCycle);
+      const currentAmount =
+        sub.subscriptionType === 'fixed'
+          ? (sub.fixedPrice || 0)
+          : roundIQD(sub.amperes * unitPrice);
+      const totalDue = currentAmount + (sub.openingBalance || 0);
+      const totalPaid = 0;
+      const remaining = totalDue;
+      return {
+        invoice: undefined,
+        totalDue,
+        totalPaid,
+        remaining,
+        isPaid: remaining === 0,
+        isPartial: false,
+        status: (remaining === 0 ? 'paid' : 'unpaid') as 'paid' | 'unpaid',
+      };
+    }
+
+    const totalDue = sub.openingBalance || 0;
+    const totalPaid = 0;
+    const remaining = totalDue;
+    return {
+      invoice: undefined,
+      totalDue,
+      totalPaid,
+      remaining,
+      isPaid: remaining === 0,
+      isPartial: false,
+      status: (remaining === 0 ? 'paid' : 'unpaid') as 'paid' | 'unpaid',
+    };
+  };
 
   // إحصائيات التحصيل لليوم
   const todayStats = useMemo(() => {
@@ -95,22 +190,33 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
     const totalCollectedToday = todayPayments.reduce((sum, p) => sum + p.amount, 0);
     const uniquePaidSubscribersToday = new Set(todayPayments.map((p) => p.subscriberId)).size;
 
-    const totalDueAll = invoices.reduce((sum, inv) => sum + inv.totalDue, 0);
-    const totalPaidAll = invoices.reduce((sum, inv) => sum + inv.totalPaid, 0);
+    let totalDueAll = 0;
+    let totalPaidAll = 0;
+
+    subscribers.forEach((sub) => {
+      const balance = getSubscriberBalance(sub);
+      totalDueAll += balance.totalDue;
+      totalPaidAll += balance.totalPaid;
+    });
+
     const remainingUnpaidTotal = Math.max(0, totalDueAll - totalPaidAll);
+    const collectionPercentage = totalDueAll > 0 ? Math.round((totalPaidAll / totalDueAll) * 100) : 0;
 
     return {
       totalCollectedToday,
       uniquePaidSubscribersToday,
       remainingUnpaidTotal,
+      totalDueAll,
+      totalPaidAll,
+      collectionPercentage,
     };
-  }, [payments, invoices]);
+  }, [payments, subscribers, invoiceMap, latestCycle]);
 
   // تصفية المشتركين بناءً على البحث والشارع وحالة الدفع
   const filteredSubscribers = useMemo(() => {
     return subscribers.filter((sub) => {
-      const inv = invoiceMap.get(sub.id);
-      const status = inv ? inv.status : 'unpaid';
+      const balance = getSubscriberBalance(sub);
+      const status = balance.status;
 
       // مطابقة البحث
       const term = searchTerm.trim().toLowerCase();
@@ -129,13 +235,22 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
 
       return matchesSearch && matchesStreet && matchesStatus;
     });
-  }, [subscribers, invoiceMap, searchTerm, selectedStreet, statusFilter]);
+  }, [subscribers, invoiceMap, latestCycle, searchTerm, selectedStreet, statusFilter]);
 
   // فتح نافذة الدفع السريع لمشترك
-  const openPaymentModal = (sub: Subscriber) => {
-    const inv = invoiceMap.get(sub.id);
-    const due = inv ? Math.max(0, inv.totalDue - inv.totalPaid) : sub.openingBalance;
-    setPayingSub({ sub, invoice: inv });
+  const openPaymentModal = async (sub: Subscriber) => {
+    let inv = invoiceMap.get(sub.id);
+    if (!inv && sub.isActive) {
+      try {
+        const synced = await syncSubscriberInvoiceForCurrentCycle(sub, latestCycle);
+        if (synced) inv = synced;
+      } catch (err) {
+        console.warn('توليد الفاتورة الاحتياطي:', err);
+      }
+    }
+    const balance = getSubscriberBalance(sub);
+    const due = balance.remaining;
+    setPayingSub({ sub, invoice: inv || balance.invoice });
     setCustomAmount(due > 0 ? due.toString() : '');
     setPaymentNote('');
   };
@@ -151,21 +266,32 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
 
     try {
       setIsSubmitting(true);
-      const tenantId = settings?.id || 'tenant-01';
+      const currentTenantId = settings?.id || tenantId || 'tenant-01';
+
+      // التأكد من وجود فاتورة مسجلة للمشترك لربط السند بها
+      let targetInvoice = payingSub.invoice;
+      let invoiceId = targetInvoice?.id;
+      if (!invoiceId && payingSub.sub.isActive) {
+        const synced = await syncSubscriberInvoiceForCurrentCycle(payingSub.sub, latestCycle);
+        if (synced) {
+          invoiceId = synced.id;
+          targetInvoice = synced;
+        }
+      }
 
       const payment = await recordPayment({
-        tenantId,
+        tenantId: currentTenantId,
         subscriberId: payingSub.sub.id,
-        invoiceId: payingSub.invoice?.id,
+        invoiceId,
         amount: amountNum,
         collectorName: collectorName || 'صاحب المولدة',
         notes: paymentNote || undefined,
       });
 
       // حساب المتبقي للوصل
-      const currentDue = payingSub.invoice
-        ? Math.max(0, payingSub.invoice.totalDue - (payingSub.invoice.totalPaid + amountNum))
-        : 0;
+      const currentDue = targetInvoice
+        ? Math.max(0, targetInvoice.totalDue - ((targetInvoice.totalPaid || 0) + amountNum))
+        : Math.max(0, payingSub.sub.openingBalance - amountNum);
 
       onRefreshSync();
       setPayingSub(null);
@@ -186,8 +312,18 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
 
   // قبض كامل بلمسة واحدة (1-Click Full Payment ⚡)
   const handleQuickFullPayment = async (sub: Subscriber) => {
-    const inv = invoiceMap.get(sub.id);
-    const due = inv ? Math.max(0, inv.totalDue - inv.totalPaid) : sub.openingBalance;
+    let inv = invoiceMap.get(sub.id);
+    if (!inv && sub.isActive) {
+      try {
+        const synced = await syncSubscriberInvoiceForCurrentCycle(sub, latestCycle);
+        if (synced) inv = synced;
+      } catch (err) {
+        console.warn('توليد الفاتورة التلقائي عند القبض السريع:', err);
+      }
+    }
+
+    const balance = getSubscriberBalance(sub);
+    const due = balance.remaining;
     if (due <= 0) return;
 
     try {
@@ -233,9 +369,16 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
 
   // إرسال تذكير بالدين عبر واتساب (WhatsApp Debt Reminder)
   const handleSendDebtReminder = (sub: Subscriber) => {
-    const inv = invoiceMap.get(sub.id);
-    const due = inv ? Math.max(0, inv.totalDue - inv.totalPaid) : sub.openingBalance;
-    const currentAmount = inv ? inv.currentAmount : 0;
+    const balance = getSubscriberBalance(sub);
+    const due = balance.remaining;
+    const inv = balance.invoice;
+    const currentAmount = inv
+      ? inv.currentAmount
+      : latestCycle && sub.isActive
+      ? sub.subscriptionType === 'fixed'
+        ? sub.fixedPrice || 0
+        : roundIQD(sub.amperes * calculateUnitPrice(sub, latestCycle))
+      : 0;
     const prevDebt = inv ? inv.previousDebt : sub.openingBalance;
     const generatorName = settings?.generatorName || 'المولدة الأهلية';
     const paymentPhone = settings?.phone || '';
@@ -265,46 +408,72 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
   return (
     <div className="space-y-4 pb-12">
       
-      {/* 1. لوحة المؤشرات المالية اليومية (سريعة وواضحة للجابي) */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        
-        <div className="bg-slate-800/80 border border-slate-700/60 rounded-2xl p-4 flex items-center justify-between shadow-lg">
-          <div>
-            <span className="text-xs font-medium text-slate-400">مقبوضات اليوم (نقداً)</span>
-            <div className="text-xl sm:text-2xl font-black text-amber-400 mt-1">
-              {formatIQD(todayStats.totalCollectedToday)}
+      {/* 1. لوحة المؤشرات المالية المدمجة (Fintech Summary Bar) */}
+      <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3 sm:p-3.5 shadow-lg backdrop-blur-sm">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3">
+          
+          {/* مقبوضات اليوم */}
+          <div className="bg-slate-950/70 border border-slate-800/80 rounded-xl p-2.5 sm:p-3 flex items-center gap-2.5 sm:gap-3">
+            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 flex-shrink-0">
+              <DollarSign className="w-4 h-4 sm:w-5 sm:h-5" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <span className="text-[10px] sm:text-[11px] font-medium text-slate-400 block truncate">مقبوضات اليوم</span>
+              <span className="text-sm sm:text-base font-black text-amber-400 block truncate">
+                {formatIQD(todayStats.totalCollectedToday)}
+              </span>
             </div>
           </div>
-          <div className="w-12 h-12 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400">
-            <DollarSign className="w-6 h-6" />
-          </div>
-        </div>
 
-        <div className="bg-slate-800/80 border border-slate-700/60 rounded-2xl p-4 flex items-center justify-between shadow-lg">
-          <div>
-            <span className="text-xs font-medium text-slate-400">المسددين اليوم</span>
-            <div className="text-xl sm:text-2xl font-black text-emerald-400 mt-1 flex items-baseline gap-1.5">
-              <span>{todayStats.uniquePaidSubscribersToday}</span>
-              <span className="text-xs font-normal text-slate-400">مشترك</span>
+          {/* المسددين اليوم */}
+          <div className="bg-slate-950/70 border border-slate-800/80 rounded-xl p-2.5 sm:p-3 flex items-center gap-2.5 sm:gap-3">
+            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 flex-shrink-0">
+              <UserCheck className="w-4 h-4 sm:w-5 sm:h-5" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <span className="text-[10px] sm:text-[11px] font-medium text-slate-400 block truncate">المسددين اليوم</span>
+              <div className="flex items-baseline gap-1">
+                <span className="text-sm sm:text-base font-black text-emerald-400">
+                  {todayStats.uniquePaidSubscribersToday}
+                </span>
+                <span className="text-[10px] text-slate-400">مشترك</span>
+              </div>
             </div>
           </div>
-          <div className="w-12 h-12 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
-            <UserCheck className="w-6 h-6" />
-          </div>
-        </div>
 
-        <div className="bg-slate-800/80 border border-slate-700/60 rounded-2xl p-4 flex items-center justify-between shadow-lg">
-          <div>
-            <span className="text-xs font-medium text-slate-400">المتبقي بذمة المشتركين</span>
-            <div className="text-xl sm:text-2xl font-black text-rose-400 mt-1">
-              {formatIQD(todayStats.remainingUnpaidTotal)}
+          {/* المتبقي المطلوب */}
+          <div className="bg-slate-950/70 border border-slate-800/80 rounded-xl p-2.5 sm:p-3 flex items-center gap-2.5 sm:gap-3">
+            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-400 flex-shrink-0">
+              <TrendingUp className="w-4 h-4 sm:w-5 sm:h-5" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <span className="text-[10px] sm:text-[11px] font-medium text-slate-400 block truncate">المتبقي المطلوب</span>
+              <span className="text-sm sm:text-base font-black text-rose-400 block truncate">
+                {formatIQD(todayStats.remainingUnpaidTotal)}
+              </span>
             </div>
           </div>
-          <div className="w-12 h-12 rounded-xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-400">
-            <TrendingUp className="w-6 h-6" />
-          </div>
-        </div>
 
+          {/* نسبة إنجاز التحصيل */}
+          <div className="bg-slate-950/70 border border-slate-800/80 rounded-xl p-2.5 sm:p-3 flex items-center gap-2.5 sm:gap-3">
+            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400 flex-shrink-0">
+              <Percent className="w-4 h-4 sm:w-5 sm:h-5" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center justify-between text-[10px] sm:text-[11px] text-slate-400 mb-1">
+                <span>نسبة التحصيل</span>
+                <span className="font-bold text-cyan-300">{todayStats.collectionPercentage}%</span>
+              </div>
+              <div className="w-full bg-slate-800 h-1.5 sm:h-2 rounded-full overflow-hidden">
+                <div
+                  className="bg-gradient-to-r from-amber-500 to-emerald-500 h-full rounded-full transition-all duration-500"
+                  style={{ width: `${Math.min(100, todayStats.collectionPercentage)}%` }}
+                />
+              </div>
+            </div>
+          </div>
+
+        </div>
       </div>
 
       {/* 2. شريط البحث السريع والفلترة بالأزقة (مخصص للعمل الميداني) */}
@@ -330,6 +499,36 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
                 <X className="w-4 h-4" />
               </button>
             )}
+          </div>
+
+          {/* نمط العرض: بطاقات / قائمة سريعة للأزقة */}
+          <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 flex-shrink-0">
+            <button
+              type="button"
+              onClick={() => handleToggleViewMode('cards')}
+              className={`flex items-center gap-1 px-2.5 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                viewMode === 'cards'
+                  ? 'bg-amber-500 text-slate-950 font-black shadow-md shadow-amber-500/20'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+              title="نمط البطاقات الأنيقة"
+            >
+              <LayoutGrid className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">بطاقات</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleToggleViewMode('compact')}
+              className={`flex items-center gap-1 px-2.5 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                viewMode === 'compact'
+                  ? 'bg-amber-500 text-slate-950 font-black shadow-md shadow-amber-500/20'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+              title="قائمة سريعة ومضغوطة للأزقة (8-10 مشتركين بالشاشة)"
+            >
+              <List className="w-3.5 h-3.5" />
+              <span>سريع للأزقة</span>
+            </button>
           </div>
 
           {/* فلتر حالة التسديد بأزرار واضحة وسهلة اللمس */}
@@ -416,40 +615,179 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
       <div className="space-y-2.5">
         <div className="flex items-center justify-between text-xs text-slate-400 px-1 font-medium">
           <span>نتائج المشتركين: ({filteredSubscribers.length}) مشترك</span>
-          <span>ترتيب القواطع والأزقة</span>
+          
+          {/* زر تبديل نمط العرض: بطاقات مفصلة أو قائمة ميدانية سريعة للأزقة */}
+          <div className="flex items-center gap-1 bg-slate-900 border border-slate-800 p-1 rounded-xl">
+            <button
+              onClick={() => handleToggleViewMode('cards')}
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                viewMode === 'cards'
+                  ? 'bg-amber-500 text-slate-950 shadow-sm'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+              title="عرض البطاقات الأنيقة"
+            >
+              <LayoutGrid className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">بطاقات</span>
+            </button>
+            <button
+              onClick={() => handleToggleViewMode('compact')}
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                viewMode === 'compact'
+                  ? 'bg-amber-500 text-slate-950 shadow-sm'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+              title="عرض القائمة الميدانية فائقة السرعة للأزقة"
+            >
+              <List className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">قائمة سريعة</span>
+            </button>
+          </div>
         </div>
 
         {filteredSubscribers.length === 0 ? (
-          <div className="bg-slate-800/40 border border-slate-800 rounded-2xl p-8 text-center text-slate-400">
+          <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-8 text-center text-slate-400">
             <p className="text-base font-semibold text-slate-300">لم يتم العثور على أي مشترك مطابق</p>
             <p className="text-xs text-slate-500 mt-1">تأكد من كتابة الاسم أو رقم القاطع بدقة أو قم بتغيير الفلتر</p>
           </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+        ) : viewMode === 'compact' ? (
+          /* وضع القائمة الميدانية فائقة السرعة (Street Fast List - 8-10 مشتركين في الشاشة) */
+          <div className="space-y-1.5">
             {filteredSubscribers.map((sub) => {
-              const inv = invoiceMap.get(sub.id);
-              const totalDue = inv ? inv.totalDue : sub.openingBalance;
-              const totalPaid = inv ? inv.totalPaid : 0;
-              const remaining = Math.max(0, totalDue - totalPaid);
-              const isPaid = remaining === 0;
-              const isPartial = totalPaid > 0 && remaining > 0;
+              const balance = getSubscriberBalance(sub);
+              const { remaining, isPaid, isPartial } = balance;
 
               return (
                 <div
                   key={sub.id}
-                  className={`bg-slate-800/90 border rounded-2xl p-4 transition-all duration-200 flex flex-col justify-between gap-3 shadow-md hover:border-slate-600 ${
+                  className={`bg-slate-900/90 border rounded-xl p-2.5 flex items-center justify-between gap-2.5 transition-all fintech-card-shadow ${
+                    isPaid
+                      ? 'border-emerald-500/25 opacity-75'
+                      : isPartial
+                      ? 'border-amber-500/40 hover:border-amber-500'
+                      : 'border-rose-500/40 hover:border-rose-500'
+                  }`}
+                >
+                  {/* نقطة الحالة والمعلومات الأساسية */}
+                  <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                    <span
+                      className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${
+                        isPaid ? 'bg-emerald-500' : isPartial ? 'bg-amber-500' : 'bg-rose-500'
+                      }`}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5 truncate">
+                        <span
+                          className="font-bold text-sm text-white truncate hover:text-amber-400 cursor-pointer"
+                          onClick={() => openPaymentModal(sub)}
+                          title="انقر لتفاصيل السند أو الدفع المخصص"
+                        >
+                          {sub.fullName}
+                        </span>
+                        {isPaid && (
+                          <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/15 px-1.5 py-0.2 rounded">
+                            خالص
+                          </span>
+                        )}
+                        {isPartial && (
+                          <span className="text-[10px] font-bold text-amber-400 bg-amber-500/15 px-1.5 py-0.2 rounded">
+                            جزئي
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-[11px] text-slate-400 flex items-center gap-2 truncate mt-0.5">
+                        <span className="text-amber-400 font-semibold">{sub.breakerNumber}</span>
+                        <span>•</span>
+                        <span>{sub.amperes}A</span>
+                        {sub.street && (
+                          <>
+                            <span>•</span>
+                            <span className="truncate">{sub.street}</span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* المبلغ وزر الإجراء السريع بلمسة واحدة */}
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <div className="text-left">
+                      <span
+                        className={`text-sm font-black block tracking-tight ${
+                          isPaid ? 'text-emerald-400' : isPartial ? 'text-amber-400' : 'text-rose-400'
+                        }`}
+                      >
+                        {isPaid ? 'خالص' : formatIQD(remaining)}
+                      </span>
+                    </div>
+
+                    {isPaid ? (
+                      <button
+                        onClick={() => openPaymentModal(sub)}
+                        className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition cursor-pointer"
+                        title="تفاصيل السند"
+                      >
+                        سند
+                      </button>
+                    ) : (
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => handleQuickFullPayment(sub)}
+                          disabled={isSubmitting}
+                          className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-black text-xs shadow-sm transition cursor-pointer flex items-center gap-1"
+                          title="قبض كامل بلمسة واحدة"
+                        >
+                          <Zap className="w-3.5 h-3.5 fill-slate-950" />
+                          <span>قبض</span>
+                        </button>
+                        <button
+                          onClick={() => handleSendDebtReminder(sub)}
+                          className="p-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 text-xs transition cursor-pointer"
+                          title="تذكير واتساب"
+                        >
+                          <MessageSquare className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => openPaymentModal(sub)}
+                          className="p-1.5 text-slate-300 hover:text-white hover:bg-slate-800 bg-slate-950 rounded-lg border border-slate-800 transition-colors cursor-pointer"
+                          title="دفع مخصص / جزئي"
+                        >
+                          <DollarSign className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          /* نمط البطاقات الأنيقة (Cards View) */
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {filteredSubscribers.map((sub) => {
+              const balance = getSubscriberBalance(sub);
+              const { totalDue, totalPaid, remaining, isPaid, isPartial } = balance;
+
+              return (
+                <div
+                  key={sub.id}
+                  className={`bg-slate-900/90 border rounded-2xl p-4 transition-all duration-200 flex flex-col justify-between gap-3 shadow-md hover:border-slate-600 ${
                     isPaid
                       ? 'border-emerald-500/30 hover:border-emerald-500/60'
                       : isPartial
                       ? 'border-amber-500/40 hover:border-amber-500/70'
-                      : 'border-rose-500/40 hover:border-rose-500/70'
+                      : 'border-slate-800 hover:border-slate-700'
                   }`}
                 >
                   {/* الرأس: الاسم ورقم القاطع */}
                   <div className="flex items-start justify-between gap-2">
                     <div>
                       <div className="flex items-center gap-2">
-                        <h4 className="font-bold text-base text-white hover:text-amber-400 cursor-pointer">
+                        <h4
+                          onClick={() => openPaymentModal(sub)}
+                          className="font-bold text-base text-white hover:text-amber-400 cursor-pointer"
+                        >
                           {sub.fullName}
                         </h4>
                         {isPaid && (
@@ -477,9 +815,9 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
                     </div>
 
                     {/* وسم رقم القاطع والأمبيرات */}
-                    <div className="text-left bg-slate-900 px-2.5 py-1.5 rounded-xl border border-slate-700/80">
+                    <div className="text-left bg-slate-950 px-2.5 py-1.5 rounded-xl border border-slate-800">
                       <div className="text-xs font-black text-amber-400 tracking-wider">
-                        {sub.breakerNumber}
+                        {sub.breakerNumber || 'قاطع'}
                       </div>
                       <div className="text-[11px] text-slate-300 font-medium">
                         {sub.amperes} أمبير
@@ -488,7 +826,7 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
                   </div>
 
                   {/* التفاصيل المالية */}
-                  <div className="bg-slate-950/60 p-2.5 rounded-xl border border-slate-800/80 text-xs space-y-1.5">
+                  <div className="bg-slate-950/70 p-2.5 rounded-xl border border-slate-800/80 text-xs space-y-1.5">
                     <div className="flex justify-between text-slate-400">
                       <span>المبلغ المستحق:</span>
                       <span className="font-bold text-slate-200">{formatIQD(totalDue)}</span>
@@ -499,7 +837,7 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
                         <span className="font-semibold">{formatIQD(totalPaid)}</span>
                       </div>
                     )}
-                    <div className="flex justify-between items-center pt-1 border-t border-slate-800 font-bold">
+                    <div className="flex justify-between items-center pt-1 border-t border-slate-800/80 font-bold">
                       <span className={remaining > 0 ? 'text-rose-400' : 'text-emerald-400'}>
                         {remaining > 0 ? 'المتبقي للتسديد:' : 'الرصيد خالص:'}
                       </span>

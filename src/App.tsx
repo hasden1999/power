@@ -29,6 +29,23 @@ export function App() {
   const [isInstallOpen, setIsInstallOpen] = useState(false);
   const [isQuickActionOpen, setIsQuickActionOpen] = useState(false);
   const [updateAvailable, setUpdateAvailable] = useState(false);
+  const [isSunlightMode, setIsSunlightMode] = useState<boolean>(() => {
+    return localStorage.getItem('sunlight_mode') === 'true';
+  });
+
+  // مزامنة وضع النهار مع جسم الصفحة والتخزين المحلي
+  useEffect(() => {
+    if (isSunlightMode) {
+      document.documentElement.classList.add('sunlight-mode');
+      document.body.classList.add('sunlight-mode');
+    } else {
+      document.documentElement.classList.remove('sunlight-mode');
+      document.body.classList.remove('sunlight-mode');
+    }
+    localStorage.setItem('sunlight_mode', String(isSunlightMode));
+  }, [isSunlightMode]);
+
+  const toggleSunlightMode = () => setIsSunlightMode((prev) => !prev);
 
   // الاستماع لحدث توفر تحديث جديد لتنبيه المستخدم بسلاسة دون مقاطعة
   useEffect(() => {
@@ -251,6 +268,8 @@ export function App() {
         onBackToAdmin={currentUser.role === 'super_admin' ? handleBackToAdmin : undefined}
         isImpersonating={Boolean(impersonatedTenant)}
         onOpenInstall={() => setIsInstallOpen(true)}
+        isSunlightMode={isSunlightMode}
+        onToggleSunlightMode={toggleSunlightMode}
       />
 
       {/* شريط تنبيه: إما فترة تجريبية مجانية (7 أيام) أو تنبيه قبل 5 أيام من انتهاء الاشتراك */}
@@ -258,9 +277,8 @@ export function App() {
         activeSettings?.expiresAt &&
         (() => {
           const daysLeft = Math.ceil((new Date(activeSettings.expiresAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-          const isTrial = activeSettings.subscriptionStatus === 'trial' || activeSettings.plan === 'trial';
-
           if (daysLeft <= 0) return null;
+          const isTrial = activeSettings.subscriptionStatus === 'trial' || activeSettings.plan === 'trial';
 
           if (isTrial) {
             return (

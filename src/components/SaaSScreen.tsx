@@ -1,4 +1,4 @@
-import { useState, type FC } from 'react';
+import { useState, useMemo, type FC } from 'react';
 import { db } from '../db/db';
 import { supabase } from '../services/supabaseClient';
 import { bluetoothPrinter } from '../services/bluetoothPrinter';
@@ -291,9 +291,11 @@ export const SaaSScreen: FC<SaaSScreenProps> = ({ settings, onUpdateSettings }) 
     a.click();
   };
 
-  const daysRemaining = settings?.expiresAt
-    ? Math.max(0, Math.ceil((new Date(settings.expiresAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
-    : 30;
+  const daysRemaining = useMemo(() => {
+    return settings?.expiresAt
+      ? Math.max(0, Math.ceil((new Date(settings.expiresAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
+      : 30;
+  }, [settings?.expiresAt]);
 
   return (
     <div className="space-y-4 pb-12">

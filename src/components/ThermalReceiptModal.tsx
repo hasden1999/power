@@ -22,11 +22,11 @@ export const ThermalReceiptModal: FC<ThermalReceiptModalProps> = ({
   remainingDebt,
   settings,
 }) => {
-  if (!isOpen) return null;
-
   const [isBluetoothPrinting, setIsBluetoothPrinting] = useState(false);
   const [printStatus, setPrintStatus] = useState<string | null>(null);
   const [printError, setPrintError] = useState<string | null>(null);
+
+  if (!isOpen) return null;
 
   const whatsappUrl = buildWhatsAppLink(subscriber, payment, remainingDebt, settings);
 
