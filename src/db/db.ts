@@ -1,12 +1,12 @@
 import Dexie, { type Table } from 'dexie';
 import { supabase } from '../services/supabaseClient';
 import { hashPassword, isPasswordHashed } from '../services/authSecurity';
-import type { Subscriber, BillingCycle, Invoice, Payment, TenantSettings, UserAccount, Expense } from '../types';
+import type { Subscriber, BillingCycle, Invoice, Payment, TenantSettings, UserAccount, Expense, AuditLog, LedgerEntry } from '../types';
 
 export interface SyncQueueItem {
   id: string;
   action: 'insert' | 'update' | 'delete';
-  entity: 'subscribers' | 'payments' | 'invoices' | 'cycles' | 'expenses';
+  entity: 'subscribers' | 'payments' | 'invoices' | 'cycles' | 'expenses' | 'auditLogs' | 'ledger';
   entityId: string;
   payload: any;
   createdAt: string;
@@ -22,6 +22,8 @@ export class GeneratorDatabase extends Dexie {
   settings!: Table<TenantSettings, string>;
   syncQueue!: Table<SyncQueueItem, string>;
   expenses!: Table<Expense, string>;
+  auditLogs!: Table<AuditLog, string>;
+  ledger!: Table<LedgerEntry, string>;
 
   constructor() {
     super('AlMowalladaDB');
@@ -35,6 +37,14 @@ export class GeneratorDatabase extends Dexie {
       settings: 'id, subscriptionStatus, isBlocked',
       syncQueue: 'id, entity, entityId, createdAt',
       expenses: 'id, tenantId, category, date, createdAt'
+    });
+
+    this.version(4).stores({
+      auditLogs: 'id, tenantId, action, entityType, entityId, createdAt'
+    });
+
+    this.version(5).stores({
+      ledger: 'id, tenantId, transactionType, referenceId, subscriberId, account, createdAt'
     });
   }
 }

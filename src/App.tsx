@@ -15,6 +15,7 @@ import { SubscriptionStatusScreen } from './components/SubscriptionStatusScreen'
 import { MobileBottomNav } from './components/MobileBottomNav';
 import { QuickActionHub } from './components/QuickActionHub';
 import { supabase } from './services/supabaseClient';
+import { AlertCircle } from 'lucide-react';
 import type { TenantSettings, UserAccount } from './types';
 
 export function App() {
@@ -32,6 +33,19 @@ export function App() {
   const [isSunlightMode, setIsSunlightMode] = useState<boolean>(() => {
     return localStorage.getItem('sunlight_mode') === 'true';
   });
+
+  // وضع واجهة البرنامج: 'simple' (الوضع السريع البسيط الافتراضي) أو 'advanced' (الوضع المتقدم)
+  const [uiMode, setUiMode] = useState<'simple' | 'advanced'>(() => {
+    return (localStorage.getItem('app_ui_mode') as 'simple' | 'advanced') || 'simple';
+  });
+
+  const toggleUiMode = () => {
+    setUiMode((prev) => {
+      const next = prev === 'simple' ? 'advanced' : 'simple';
+      localStorage.setItem('app_ui_mode', next);
+      return next;
+    });
+  };
 
   // مزامنة وضع النهار مع جسم الصفحة والتخزين المحلي
   useEffect(() => {
@@ -231,6 +245,7 @@ export function App() {
         user={currentUser}
         onLogout={handleLogout}
         onRefreshTenant={refreshTenantData}
+        adminPhone={localStorage.getItem('platform_admin_phone') || '07764271130'}
       />
     );
   }
@@ -270,6 +285,8 @@ export function App() {
         onOpenInstall={() => setIsInstallOpen(true)}
         isSunlightMode={isSunlightMode}
         onToggleSunlightMode={toggleSunlightMode}
+        uiMode={uiMode}
+        onToggleUiMode={toggleUiMode}
       />
 
       {/* شريط تنبيه: إما فترة تجريبية مجانية (7 أيام) أو تنبيه قبل 5 أيام من انتهاء الاشتراك */}
@@ -337,19 +354,42 @@ export function App() {
             tenantId={tenantId}
             settings={activeSettings}
             onRefreshSync={syncInfo.refreshPendingCount}
+            currentUser={currentUser}
           />
         )}
 
         {currentTab === 'subscribers' && (
-          <SubscribersScreen tenantId={tenantId} />
+          <SubscribersScreen 
+            tenantId={tenantId} 
+            currentUser={currentUser}
+          />
         )}
 
         {currentTab === 'pricing' && (
-          <PricingScreen
-            tenantId={tenantId}
-            settings={activeSettings}
-            onRefreshSync={syncInfo.refreshPendingCount}
-          />
+          currentUser.role === 'collector' ? (
+            <div className="p-8 text-center bg-slate-900/90 rounded-2xl border border-rose-500/30 text-slate-200">
+              <div className="w-12 h-12 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center mx-auto mb-3">
+                <AlertCircle className="w-6 h-6" />
+              </div>
+              <h3 className="text-base font-bold text-white">غير مصرح بالدخول</h3>
+              <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
+                شاشة تحديد الأسعار وإصدار القوائم خاصة بصاحب المولدة فقط لمنع التلاعب.
+              </p>
+              <button
+                onClick={() => setCurrentTab('collection')}
+                className="mt-4 bg-amber-500 hover:bg-amber-400 text-slate-950 px-4 py-2 rounded-xl text-xs font-black cursor-pointer"
+              >
+                العودة إلى شاشة الجباية
+              </button>
+            </div>
+          ) : (
+            <PricingScreen
+              tenantId={tenantId}
+              settings={activeSettings}
+              onRefreshSync={syncInfo.refreshPendingCount}
+              currentUser={currentUser}
+            />
+          )
         )}
 
         {currentTab === 'expenses' && (
@@ -357,14 +397,35 @@ export function App() {
             tenantId={tenantId}
             settings={activeSettings}
             onRefreshSync={syncInfo.refreshPendingCount}
+            currentUser={currentUser}
           />
         )}
 
         {currentTab === 'saas' && (
-          <SaaSScreen
-            settings={activeSettings}
-            onUpdateSettings={() => syncInfo.refreshPendingCount()}
-          />
+          currentUser.role === 'collector' ? (
+            <div className="p-8 text-center bg-slate-900/90 rounded-2xl border border-rose-500/30 text-slate-200">
+              <div className="w-12 h-12 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center mx-auto mb-3">
+                <AlertCircle className="w-6 h-6" />
+              </div>
+              <h3 className="text-base font-bold text-white">غير مصرح بالدخول</h3>
+              <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
+                شاشة اشتراك المنظومة وإدارة التراخيص خاصة بصاحب المولدة فقط.
+              </p>
+              <button
+                onClick={() => setCurrentTab('collection')}
+                className="mt-4 bg-amber-500 hover:bg-amber-400 text-slate-950 px-4 py-2 rounded-xl text-xs font-black cursor-pointer"
+              >
+                العودة إلى شاشة الجباية
+              </button>
+            </div>
+          ) : (
+            <SaaSScreen
+              settings={activeSettings}
+              onUpdateSettings={() => syncInfo.refreshPendingCount()}
+              uiMode={uiMode}
+              onToggleUiMode={toggleUiMode}
+            />
+          )
         )}
 
       </main>
@@ -374,6 +435,8 @@ export function App() {
         currentTab={currentTab}
         setCurrentTab={setCurrentTab}
         onOpenQuickAction={() => setIsQuickActionOpen(true)}
+        uiMode={uiMode}
+        currentUser={currentUser}
       />
 
       {/* صفيحة الإجراءات السريعة الفورية */}
@@ -384,6 +447,9 @@ export function App() {
           setCurrentTab(tab);
           setIsQuickActionOpen(false);
         }}
+        uiMode={uiMode}
+        onToggleUiMode={toggleUiMode}
+        currentUser={currentUser}
       />
 
       {/* تذييل الصفحة (مخفي في الهواتف لمنح الشاشة كامل المساحة) */}

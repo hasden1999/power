@@ -1,5 +1,5 @@
 import { db } from '../db/db';
-import type { Subscriber, BillingCycle, Invoice, Payment } from '../types';
+import type { Subscriber, BillingCycle, Invoice, Payment, AuditLog, UserRole, LedgerEntry } from '../types';
 
 /**
  * تقريب وضبط المبالغ المالية بالدينار العراقي كأعداد صحيحة موجبة
@@ -76,10 +76,21 @@ export async function syncSubscriberInvoiceForCurrentCycle(
   const now = new Date().toISOString();
 
   if (existingInvoice) {
-    // تعديل الفاتورة الحالية (مثلاً عند تعديل الأمبيرات أو نوع الاشتراك في وسط الشهر)
+    // تعديل الفاتورة الحالية: إعادة احتساب الديون السابقة غير المسددة ديناميكياً لضمان عدم تجميد الدين
+    const pastInvoices = await db.invoices
+      .where('subscriberId')
+      .equals(subscriber.id)
+      .filter((inv) => inv.cycleId !== cycle.id && inv.status !== 'paid')
+      .toArray();
+
+    const previousUnpaidSum = pastInvoices.reduce(
+      (sum, inv) => sum + Math.max(0, (inv.totalDue || 0) - (inv.totalPaid || 0)),
+      0
+    );
+
+    const freshPreviousDebt = previousUnpaidSum + (subscriber.openingBalance || 0);
     const discount = existingInvoice.discount || 0;
-    const previousDebt = existingInvoice.previousDebt || 0;
-    const totalDue = Math.max(0, currentAmount + previousDebt - discount);
+    const totalDue = Math.max(0, currentAmount + freshPreviousDebt - discount);
     const totalPaid = existingInvoice.totalPaid || 0;
     const status = totalPaid >= totalDue ? 'paid' : totalPaid > 0 ? 'partial' : 'unpaid';
 
@@ -88,22 +99,24 @@ export async function syncSubscriberInvoiceForCurrentCycle(
       amperes: subscriber.amperes,
       unitPrice,
       currentAmount,
+      previousDebt: freshPreviousDebt,
       totalDue,
       status,
       updatedAt: now,
     };
 
-    await db.invoices.put(updatedInvoice);
+    await db.transaction('rw', [db.invoices, db.syncQueue], async () => {
+      await db.invoices.put(updatedInvoice);
 
-    // إضافة إلى طابور المزامنة
-    await db.syncQueue.add({
-      id: `sync-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
-      action: 'update',
-      entity: 'invoices',
-      entityId: updatedInvoice.id,
-      payload: updatedInvoice,
-      createdAt: now,
-      attempts: 0,
+      await db.syncQueue.add({
+        id: `sync-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
+        action: 'update',
+        entity: 'invoices',
+        entityId: updatedInvoice.id,
+        payload: updatedInvoice,
+        createdAt: now,
+        attempts: 0,
+      });
     });
 
     return updatedInvoice;
@@ -223,7 +236,53 @@ export async function generateInvoicesForCycle(cycle: BillingCycle): Promise<num
   return generatedCount;
 }
 
-// تسجيل دفعة جديدة وسند قبض فوري
+// توليد رقم تسلسلي مضمون للوصولات يمنع التكرار نهائياً (Sequential Receipt Numbering)
+export async function getNextReceiptNumber(tenantId: string, collectorName?: string): Promise<string> {
+  const currentYear = new Date().getFullYear();
+  const cPrefix = (collectorName || 'COL')
+    .trim()
+    .slice(0, 3)
+    .replace(/[^a-zA-Z0-9\u0621-\u064A]/g, '') || 'COL';
+  const storageKey = `power_receipt_seq_${tenantId}_${currentYear}`;
+
+  let localSeq = parseInt(localStorage.getItem(storageKey) || '0', 10);
+
+  // إذا لم يكن موجوداً في localStorage، نقوم بالبحث عن أعلى تسلسل موجود في قاعدة البيانات لنفس السنة
+  if (localSeq === 0) {
+    try {
+      const allPayments = await db.payments.where('tenantId').equals(tenantId).toArray();
+      let maxSeq = 0;
+      const regex = new RegExp(`REC-${currentYear}-[A-Za-z0-9\u0621-\u064A]+-(\\d+)`);
+      const fallbackRegex = new RegExp(`REC-${currentYear}-(\\d+)`);
+
+      for (const p of allPayments) {
+        if (p.receiptNumber) {
+          const m1 = p.receiptNumber.match(regex);
+          if (m1 && m1[1]) {
+            const num = parseInt(m1[1], 10);
+            if (num > maxSeq) maxSeq = num;
+          } else {
+            const m2 = p.receiptNumber.match(fallbackRegex);
+            if (m2 && m2[1]) {
+              const num = parseInt(m2[1], 10);
+              if (num > maxSeq) maxSeq = num;
+            }
+          }
+        }
+      }
+      localSeq = maxSeq;
+    } catch (e) {
+      console.warn('تعذر قراءة الحد الأقصى لأرقام السندات من قاعدة البيانات:', e);
+    }
+  }
+
+  localSeq += 1;
+  localStorage.setItem(storageKey, localSeq.toString());
+
+  return `REC-${currentYear}-${cPrefix}-${localSeq.toString().padStart(5, '0')}`;
+}
+
+// تسجيل دفعة جديدة وسند قبض فوري بمعاملة ذرية مغلقة (Atomic Transaction)
 export async function recordPayment(params: {
   tenantId: string;
   subscriberId: string;
@@ -231,8 +290,10 @@ export async function recordPayment(params: {
   amount: number;
   collectorName: string;
   notes?: string;
+  userId?: string;
+  userRole?: UserRole;
 }): Promise<Payment> {
-  const { tenantId, subscriberId, invoiceId, amount, collectorName, notes } = params;
+  const { tenantId, subscriberId, invoiceId, amount, collectorName, notes, userId, userRole } = params;
 
   const cleanAmount = roundIQD(amount);
   if (cleanAmount <= 0) {
@@ -241,10 +302,10 @@ export async function recordPayment(params: {
 
   const cleanCollector = (collectorName || 'الجابي').trim().slice(0, 80);
   const cleanNotes = notes ? notes.trim().slice(0, 300) : undefined;
-  const paymentNumber = 'REC-' + Math.floor(100000 + Math.random() * 900000);
+  const paymentNumber = await getNextReceiptNumber(tenantId, cleanCollector);
 
   const payment: Payment = {
-    id: `pay-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+    id: `pay-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
     tenantId,
     subscriberId,
     invoiceId,
@@ -256,37 +317,98 @@ export async function recordPayment(params: {
     receiptNumber: paymentNumber,
   };
 
-  await db.payments.add(payment);
-
-  // تحديث حالة الفاتورة
-  if (invoiceId) {
-    const invoice = await db.invoices.get(invoiceId);
-    if (invoice) {
-      const newTotalPaid = (invoice.totalPaid || 0) + cleanAmount;
-      const newStatus =
-        newTotalPaid >= invoice.totalDue
-          ? 'paid'
-          : newTotalPaid > 0
-          ? 'partial'
-          : 'unpaid';
-
-      await db.invoices.update(invoiceId, {
-        totalPaid: newTotalPaid,
-        status: newStatus,
-        updatedAt: new Date().toISOString(),
-      });
-    }
-  }
-
-  // إضافة العملية لطابور المزامنة في حال كان أوفلاين
-  await db.syncQueue.add({
-    id: `sync-${Date.now()}`,
-    action: 'insert',
-    entity: 'payments',
+  const auditLog: AuditLog = {
+    id: `audit-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+    tenantId,
+    userId: userId || 'collector-local',
+    userName: cleanCollector,
+    userRole: userRole || 'collector',
+    action: 'payment_recorded',
+    entityType: 'payment',
     entityId: payment.id,
-    payload: payment,
+    details: {
+      amount: cleanAmount,
+      receiptNumber: paymentNumber,
+      subscriberId,
+      invoiceId,
+    },
     createdAt: new Date().toISOString(),
-    attempts: 0,
+  };
+
+  // قفل ذري كامل للعملية يمنع أي Race Condition أو تجزؤ في التحديثات
+  await db.transaction('rw', [db.payments, db.invoices, db.syncQueue, db.auditLogs, db.ledger], async () => {
+    await db.payments.add(payment);
+    await db.auditLogs.add(auditLog);
+
+    // تسجيل القيد المزدوج في دفتر الأستاذ العام (Double-Entry Ledger)
+    const ledgerDebitCash: LedgerEntry = {
+      id: `led-${Date.now()}-c`,
+      tenantId,
+      transactionType: 'payment_received',
+      referenceId: payment.id,
+      subscriberId,
+      account: 'cash_box',
+      debit: cleanAmount,
+      credit: 0,
+      description: `قبض نقدي بموجب السند ${paymentNumber}`,
+      createdAt: payment.paymentDate,
+    };
+
+    const ledgerCreditSub: LedgerEntry = {
+      id: `led-${Date.now()}-s`,
+      tenantId,
+      transactionType: 'payment_received',
+      referenceId: payment.id,
+      subscriberId,
+      account: 'subscriber_receivable',
+      debit: 0,
+      credit: cleanAmount,
+      description: `تسديد اشتراك بموجب السند ${paymentNumber}`,
+      createdAt: payment.paymentDate,
+    };
+
+    await db.ledger.bulkAdd([ledgerDebitCash, ledgerCreditSub]);
+
+    // تحديث حالة الفاتورة
+    if (invoiceId) {
+      const invoice = await db.invoices.get(invoiceId);
+      if (invoice) {
+        const newTotalPaid = (invoice.totalPaid || 0) + cleanAmount;
+        const newStatus =
+          newTotalPaid >= invoice.totalDue
+            ? 'paid'
+            : newTotalPaid > 0
+            ? 'partial'
+            : 'unpaid';
+
+        await db.invoices.update(invoiceId, {
+          totalPaid: newTotalPaid,
+          status: newStatus,
+          updatedAt: new Date().toISOString(),
+        });
+      }
+    }
+
+    // إضافة العملية لطابور المزامنة
+    await db.syncQueue.add({
+      id: `sync-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
+      action: 'insert',
+      entity: 'payments',
+      entityId: payment.id,
+      payload: payment,
+      createdAt: new Date().toISOString(),
+      attempts: 0,
+    });
+
+    await db.syncQueue.add({
+      id: `sync-${Date.now()}-${Math.random().toString(36).substring(2, 5)}b`,
+      action: 'insert',
+      entity: 'auditLogs',
+      entityId: auditLog.id,
+      payload: auditLog,
+      createdAt: new Date().toISOString(),
+      attempts: 0,
+    });
   });
 
   return payment;

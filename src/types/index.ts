@@ -27,6 +27,8 @@ export interface Subscriber {
   openingBalance: number; // ديون سابقة مرحلة عند بداية التسجيل
   isActive: boolean;
   notes?: string;
+  version?: number; // رقم الإصدار لتتبع التعديلات وحل التعارضات
+  isDeleted?: boolean; // الحذف الناعم (Soft Delete)
   createdAt: string;
   updatedAt: string;
 }
@@ -42,7 +44,10 @@ export interface BillingCycle {
   issueDate: string;
   notes?: string;
   isClosed: boolean;
+  version?: number;
+  isDeleted?: boolean;
   createdAt: string;
+  updatedAt?: string;
 }
 
 export interface Invoice {
@@ -60,6 +65,8 @@ export interface Invoice {
   totalDue: number; // currentAmount + previousDebt - discount
   totalPaid: number; // المبالغ المسددة فعلياً
   status: 'unpaid' | 'partial' | 'paid';
+  version?: number;
+  isDeleted?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -75,6 +82,10 @@ export interface Payment {
   notes?: string;
   syncStatus: 'pending' | 'synced'; // للمزامنة الأوفلاين
   receiptNumber: string; // رقم السند الورقي أو المتسلسل
+  version?: number;
+  isDeleted?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface TenantSettings {
@@ -91,7 +102,10 @@ export interface TenantSettings {
   autoSendWhatsapp: boolean;
   defaultPriceNormal: number;
   defaultPriceGold: number;
+  version?: number;
+  isDeleted?: boolean;
   createdAt: string;
+  updatedAt?: string;
 }
 
 export type ExpenseCategory = 'fuel' | 'oil_maintenance' | 'repairs' | 'salaries' | 'rent' | 'other';
@@ -106,6 +120,57 @@ export interface Expense {
   date: string; // YYYY-MM-DD
   notes?: string;
   createdByName: string; // اسم مسجل المصروف
+  version?: number;
+  isDeleted?: boolean;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export type AuditAction = 
+  | 'create' 
+  | 'update' 
+  | 'delete' 
+  | 'payment_recorded' 
+  | 'price_changed' 
+  | 'debt_adjusted' 
+  | 'login' 
+  | 'logout';
+
+export type AuditEntityType = 
+  | 'subscriber' 
+  | 'invoice' 
+  | 'payment' 
+  | 'billing_cycle' 
+  | 'expense' 
+  | 'tenant_settings' 
+  | 'auth';
+
+export interface AuditLog {
+  id: string; // UUID
+  tenantId: string;
+  userId: string;
+  userName: string;
+  userRole: UserRole;
+  action: AuditAction;
+  entityType: AuditEntityType;
+  entityId: string;
+  details?: Record<string, any>;
+  createdAt: string;
+}
+
+export type LedgerAccount = 'subscriber_receivable' | 'cash_box' | 'revenue' | 'expense';
+export type LedgerTransactionType = 'invoice_issued' | 'payment_received' | 'debt_adjustment' | 'expense_paid';
+
+export interface LedgerEntry {
+  id: string; // UUID
+  tenantId: string;
+  transactionType: LedgerTransactionType;
+  referenceId: string; // invoiceId, paymentId, expenseId
+  subscriberId?: string;
+  account: LedgerAccount;
+  debit: number; // مدين
+  credit: number; // دائن
+  description: string;
   createdAt: string;
 }
 

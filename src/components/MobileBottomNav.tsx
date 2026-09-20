@@ -1,11 +1,14 @@
 import type { FC } from 'react';
 import { Zap, Users, Plus, TrendingDown, Settings } from 'lucide-react';
+import type { UserAccount } from '../types';
 
 interface MobileBottomNavProps {
   currentTab: 'collection' | 'subscribers' | 'pricing' | 'expenses' | 'saas';
   setCurrentTab: (tab: 'collection' | 'subscribers' | 'pricing' | 'expenses' | 'saas') => void;
   onOpenQuickAction: () => void;
   unpaidCount?: number;
+  uiMode?: 'simple' | 'advanced';
+  currentUser?: UserAccount;
 }
 
 export const MobileBottomNav: FC<MobileBottomNavProps> = ({
@@ -13,6 +16,8 @@ export const MobileBottomNav: FC<MobileBottomNavProps> = ({
   setCurrentTab,
   onOpenQuickAction,
   unpaidCount = 0,
+  uiMode = 'simple',
+  currentUser,
 }) => {
   return (
     <div className="fixed bottom-0 inset-x-0 z-40 md:hidden">
@@ -71,41 +76,47 @@ export const MobileBottomNav: FC<MobileBottomNavProps> = ({
           <span className="text-[9px] font-bold text-amber-300 mt-1">سريع</span>
         </div>
 
-        {/* تبويب المصاريف والأرباح */}
-        <button
-          type="button"
-          onClick={() => setCurrentTab('expenses')}
-          className={`flex-1 flex flex-col items-center justify-center py-1 rounded-2xl transition-all cursor-pointer ${
-            currentTab === 'expenses'
-              ? 'text-amber-400 font-black scale-105'
-              : 'text-slate-400 hover:text-slate-200 font-medium'
-          }`}
-        >
-          <div className={`p-1.5 rounded-xl transition-all ${
-            currentTab === 'expenses' ? 'bg-amber-500/15 border border-amber-500/30 shadow-sm' : ''
-          }`}>
-            <TrendingDown className="w-5 h-5" />
-          </div>
-          <span className="text-[10px] mt-0.5 tracking-tight">المصاريف</span>
-        </button>
+        {/* تبويب المصاريف والأرباح (يظهر فقط في الوضع المتقدم) */}
+        {uiMode === 'advanced' && (
+          <button
+            type="button"
+            onClick={() => setCurrentTab('expenses')}
+            className={`flex-1 flex flex-col items-center justify-center py-1 rounded-2xl transition-all cursor-pointer ${
+              currentTab === 'expenses'
+                ? 'text-amber-400 font-black scale-105'
+                : 'text-slate-400 hover:text-slate-200 font-medium'
+            }`}
+          >
+            <div className={`p-1.5 rounded-xl transition-all ${
+              currentTab === 'expenses' ? 'bg-amber-500/15 border border-amber-500/30 shadow-sm' : ''
+            }`}>
+              <TrendingDown className="w-5 h-5" />
+            </div>
+            <span className="text-[10px] mt-0.5 tracking-tight">المصاريف</span>
+          </button>
+        )}
 
-        {/* تبويب الإدارة والإعدادات */}
-        <button
-          type="button"
-          onClick={() => setCurrentTab('saas')}
-          className={`flex-1 flex flex-col items-center justify-center py-1 rounded-2xl transition-all cursor-pointer ${
-            currentTab === 'saas'
-              ? 'text-amber-400 font-black scale-105'
-              : 'text-slate-400 hover:text-slate-200 font-medium'
-          }`}
-        >
-          <div className={`p-1.5 rounded-xl transition-all ${
-            currentTab === 'saas' ? 'bg-amber-500/15 border border-amber-500/30 shadow-sm' : ''
-          }`}>
-            <Settings className="w-5 h-5" />
-          </div>
-          <span className="text-[10px] mt-0.5 tracking-tight">الإدارة</span>
-        </button>
+        {/* تبويب اشتراك المولدة والإدارة */}
+        {currentUser?.role !== 'collector' && (
+          <button
+            type="button"
+            onClick={() => setCurrentTab('saas')}
+            className={`flex-1 flex flex-col items-center justify-center py-1 rounded-2xl transition-all cursor-pointer ${
+              currentTab === 'saas'
+                ? 'text-amber-400 font-black scale-105'
+                : 'text-slate-400 hover:text-slate-200 font-medium'
+            }`}
+          >
+            <div className={`p-1.5 rounded-xl transition-all ${
+              currentTab === 'saas' ? 'bg-amber-500/15 border border-amber-500/30 shadow-sm' : ''
+            }`}>
+              <Settings className="w-5 h-5" />
+            </div>
+            <span className="text-[10px] mt-0.5 tracking-tight">
+              {uiMode === 'simple' ? 'الاشتراك' : 'الإدارة'}
+            </span>
+          </button>
+        )}
 
       </nav>
     </div>

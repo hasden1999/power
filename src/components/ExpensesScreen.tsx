@@ -2,8 +2,9 @@ import { useState, useMemo, type FC } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/db';
 import { formatIQD } from '../services/billingService';
+import { logAuditAction } from '../services/auditService';
 import { BottomSheet } from './BottomSheet';
-import type { Expense, ExpenseCategory, TenantSettings } from '../types';
+import type { Expense, ExpenseCategory, TenantSettings, UserAccount } from '../types';
 import {
   DollarSign,
   Fuel,
@@ -22,6 +23,7 @@ interface ExpensesScreenProps {
   tenantId: string;
   settings?: TenantSettings;
   onRefreshSync?: () => void;
+  currentUser?: UserAccount;
 }
 
 const CATEGORY_LABELS: Record<ExpenseCategory, { label: string; color: string; icon: any }> = {
@@ -37,6 +39,7 @@ export const ExpensesScreen: FC<ExpensesScreenProps> = ({
   tenantId,
   settings,
   onRefreshSync,
+  currentUser,
 }) => {
   const currentDate = new Date();
   const [selectedMonth, setSelectedMonth] = useState<number>(currentDate.getMonth() + 1);
@@ -127,6 +130,7 @@ export const ExpensesScreen: FC<ExpensesScreenProps> = ({
 
     setIsSubmitting(true);
     try {
+      const creator = currentUser?.fullName || settings?.ownerName || 'مسؤول المولدة';
       const newExpense: Expense = {
         id: 'exp-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
         tenantId,
@@ -136,11 +140,28 @@ export const ExpensesScreen: FC<ExpensesScreenProps> = ({
         liters: category === 'fuel' && liters ? parseFloat(liters) : undefined,
         date: expenseDate,
         notes: notes.trim() || undefined,
-        createdByName: settings?.ownerName || 'صاحب المولدة',
+        createdByName: creator,
         createdAt: new Date().toISOString(),
       };
 
       await db.expenses.add(newExpense);
+
+      // تسجيل العملية في سجل التدقيق والرقابة
+      await logAuditAction({
+        tenantId,
+        userId: currentUser?.id,
+        userName: creator,
+        userRole: currentUser?.role || 'tenant_owner',
+        action: 'create',
+        entityType: 'expense',
+        entityId: newExpense.id,
+        details: {
+          title: newExpense.title,
+          category: newExpense.category,
+          amount: newExpense.amount,
+          liters: newExpense.liters,
+        },
+      });
 
       // إضافة لطابور المزامنة
       await db.syncQueue.add({
@@ -169,11 +190,29 @@ export const ExpensesScreen: FC<ExpensesScreenProps> = ({
     }
   };
 
-  // حذف مصروف
+  // حذف مصروف (محظور على الجابي)
   const handleDeleteExpense = async (id: string, expTitle: string) => {
+    if (currentUser?.role === 'collector') {
+      alert('عذراً، لا يمتلك الجابي صلاحية حذف المصاريف. هذه الصلاحية محصورة بصاحب المولدة فقط.');
+      return;
+    }
+
     if (!confirm('هل أنت متأكد من حذف المصروف: ' + expTitle + '؟')) return;
     try {
       await db.expenses.delete(id);
+
+      // تسجيل الحذف في سجل التدقيق والرقابة
+      await logAuditAction({
+        tenantId,
+        userId: currentUser?.id,
+        userName: currentUser?.fullName || 'صاحب المولدة',
+        userRole: currentUser?.role || 'tenant_owner',
+        action: 'delete',
+        entityType: 'expense',
+        entityId: id,
+        details: { title: expTitle },
+      });
+
       await db.syncQueue.add({
         id: 'sync-' + Date.now(),
         action: 'delete',
@@ -481,13 +520,15 @@ export const ExpensesScreen: FC<ExpensesScreenProps> = ({
                     ) : null}
                   </div>
 
-                  <button
-                    onClick={() => handleDeleteExpense(exp.id, exp.title)}
-                    className="p-2 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-xl transition-all cursor-pointer"
-                    title="حذف المصروف"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                  {currentUser?.role !== 'collector' && (
+                    <button
+                      onClick={() => handleDeleteExpense(exp.id, exp.title)}
+                      className="p-2 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-xl transition-all cursor-pointer"
+                      title="حذف المصروف"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
                 </div>
               </div>
             );

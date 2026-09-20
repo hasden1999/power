@@ -1,7 +1,9 @@
 import { useState, useMemo, type FC } from 'react';
+import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/db';
 import { supabase } from '../services/supabaseClient';
 import { bluetoothPrinter } from '../services/bluetoothPrinter';
+import { getActionLabel } from '../services/auditService';
 import type { TenantSettings } from '../types';
 import {
   ShieldCheck,
@@ -20,7 +22,12 @@ import {
   Clock,
   Upload,
   Database,
-  RefreshCw
+  RefreshCw,
+  Phone,
+  Zap,
+  Sliders,
+  History,
+  FileSpreadsheet
 } from 'lucide-react';
 import { APP_VERSION, forceReloadAndClearCache } from '../services/appUpdater';
 
@@ -28,9 +35,11 @@ import { APP_VERSION, forceReloadAndClearCache } from '../services/appUpdater';
 interface SaaSScreenProps {
   settings?: TenantSettings;
   onUpdateSettings: (newSettings: TenantSettings) => void;
+  uiMode?: 'simple' | 'advanced';
+  onToggleUiMode?: () => void;
 }
 
-export const SaaSScreen: FC<SaaSScreenProps> = ({ settings, onUpdateSettings }) => {
+export const SaaSScreen: FC<SaaSScreenProps> = ({ settings, onUpdateSettings, uiMode = 'simple', onToggleUiMode }) => {
 
   const [generatorName, setGeneratorName] = useState(settings?.generatorName || 'مولدة القدس الأهلية');
   const [ownerName, setOwnerName] = useState(settings?.ownerName || 'أبو كرار');
@@ -240,11 +249,47 @@ export const SaaSScreen: FC<SaaSScreenProps> = ({ settings, onUpdateSettings }) 
     reader.readAsText(file, 'utf-8');
   };
 
+  // جلب سجلات التدقيق والرقابة للمولدة
+  const auditLogs = useLiveQuery(
+    () => (settings?.id ? db.auditLogs.where('tenantId').equals(settings.id).reverse().sortBy('createdAt') : []),
+    [settings?.id]
+  ) || [];
+
+  const handleExportAuditCSV = () => {
+    if (auditLogs.length === 0) {
+      alert('لا توجد سجلات تدقيق لتصديرها حالياً.');
+      return;
+    }
+
+    const headers = ['التاريخ والوقت', 'المستخدم', 'الدور', 'العملية', 'النوع', 'المعرف', 'التفاصيل'];
+    const rows = auditLogs.map((log) => [
+      new Date(log.createdAt).toLocaleString('ar-IQ'),
+      log.userName,
+      log.userRole === 'collector' ? 'جابي' : log.userRole === 'tenant_owner' ? 'صاحب مولدة' : 'مدير',
+      getActionLabel(log.action).label,
+      log.entityType,
+      log.entityId,
+      log.details ? JSON.stringify(log.details) : '',
+    ]);
+
+    const csvContent = '\uFEFF' + [headers.join(','), ...rows.map((r) => r.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `سجل-الرقابة-${(settings?.generatorName || 'مولدة').replace(/\s+/g, '-')}-${new Date().toISOString().split('T')[0]}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const isTrial = settings?.subscriptionStatus === 'trial' || settings?.plan === 'trial';
 
-  // طلب تجديد أو تفعيل الاشتراك عبر واتساب مطور المنصة
+  const adminPhone = localStorage.getItem('platform_admin_phone') || '07764271130';
+  const cleanPhone = adminPhone.trim().replace(/\s+/g, '').replace(/-/g, '');
+  const waPhone = cleanPhone.startsWith('07') ? '964' + cleanPhone.substring(1) : cleanPhone;
+
+  // طلب تجديد أو تفعيل الاشتراك عبر واتساب إدارة المنصة
   const handleRequestRenewalWhatsApp = () => {
-    const devPhone = '9647764271130';
     const planStr = selectedPlan === 'yearly' ? 'السنوي (150,000 د.ع - خصم شهرين)' : 'الشهري (15,000 د.ع)';
     const expiryDateStr = settings?.expiresAt
       ? new Date(settings.expiresAt).toLocaleDateString('ar-IQ')
@@ -267,7 +312,7 @@ export const SaaSScreen: FC<SaaSScreenProps> = ({ settings, onUpdateSettings }) 
 
 يرجى تزويدي برقم محفظة زين كاش أو كي كارد لتسديد المبلغ وتفعيل الاشتراك. شكراً جزيلاً!`;
 
-    window.open(`https://wa.me/${devPhone}?text=${encodeURIComponent(message)}`, '_blank');
+    window.open(`https://wa.me/${waPhone}?text=${encodeURIComponent(message)}`, '_blank');
   };
 
   // تصدير نسخة احتياطية من قاعدة البيانات أوفلاين
@@ -300,15 +345,15 @@ export const SaaSScreen: FC<SaaSScreenProps> = ({ settings, onUpdateSettings }) 
   return (
     <div className="space-y-4 pb-12">
       
-      {/* رأس شاشة الـ SaaS */}
+      {/* رأس شاشة بيانات واشتراك المولدة */}
       <div className="bg-slate-800/80 border border-slate-700/60 rounded-2xl p-4 shadow-lg flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
         <div>
           <h2 className="text-lg font-bold text-white flex items-center gap-2">
             <ShieldCheck className="w-5 h-5 text-amber-400" />
-            <span>إدارة اشتراك نظام الـ SaaS وإعدادات المولدة</span>
+            <span>بيانات واشتراك المولدة والتواصل مع الإدارة</span>
           </h2>
           <p className="text-xs text-slate-400 mt-0.5">
-            تخصيص بيانات المولدة الظاهرة في الوصولات، وتجديد اشتراك السحابة والمزامنة
+            تخصيص هوية المولدة في الوصولات والطباعة، وحالة الاشتراك مع دعم فني مباشر
           </p>
         </div>
 
@@ -435,16 +480,16 @@ export const SaaSScreen: FC<SaaSScreenProps> = ({ settings, onUpdateSettings }) 
           </form>
         </div>
 
-        {/* خطط اشتراك الـ SaaS والدفع العراقي */}
+        {/* بطاقة اشتراك المنظومة والتواصل المباشر مع الإدارة */}
         <div className="bg-slate-800/90 border border-slate-700 rounded-2xl p-5 shadow-lg flex flex-col justify-between space-y-4">
           <div>
             <h3 className="font-bold text-sm text-white mb-2 flex items-center gap-2 border-b border-slate-700/80 pb-2">
               <CreditCard className="w-4 h-4 text-amber-400" />
-              تجديد اشتراك منصة الـ SaaS
+              تفعيل واشتراك المنظومة
             </h3>
 
-            <p className="text-xs text-slate-400 mb-3">
-              اختر خطة الاشتراك المناسبة لمولدتك لتفعيل المزامنة السحابية غير المحدودة والنسخ التلقائي
+            <p className="text-xs text-slate-300 leading-relaxed mb-3">
+              🛡️ السيرفرات، المزامنة السحابية، والنسخ الاحتياطي مشمولة ومؤمّنة وتُدار مركزياً بواسطة إدارة المنصة. لتفعيل اشتراكك أو تجديده تواصل مباشرة مع الإدارة:
             </p>
 
             {/* بطاقات اختيار الخطة */}
@@ -453,7 +498,7 @@ export const SaaSScreen: FC<SaaSScreenProps> = ({ settings, onUpdateSettings }) 
                 onClick={() => setSelectedPlan('monthly')}
                 className={`p-3 rounded-xl border cursor-pointer transition-all ${
                   selectedPlan === 'monthly'
-                    ? 'bg-amber-500/15 border-amber-500 text-white'
+                    ? 'bg-amber-500/15 border-amber-500 text-white ring-1 ring-amber-500'
                     : 'bg-slate-950/70 border-slate-800 text-slate-400'
                 }`}
               >
@@ -466,7 +511,7 @@ export const SaaSScreen: FC<SaaSScreenProps> = ({ settings, onUpdateSettings }) 
                 onClick={() => setSelectedPlan('yearly')}
                 className={`p-3 rounded-xl border cursor-pointer transition-all relative overflow-hidden ${
                   selectedPlan === 'yearly'
-                    ? 'bg-amber-500/15 border-amber-500 text-white'
+                    ? 'bg-amber-500/15 border-amber-500 text-white ring-1 ring-amber-500'
                     : 'bg-slate-950/70 border-slate-800 text-slate-400'
                 }`}
               >
@@ -480,13 +525,10 @@ export const SaaSScreen: FC<SaaSScreenProps> = ({ settings, onUpdateSettings }) 
             </div>
 
             {/* وسائل الدفع المعتمدة وطريقة التفعيل */}
-            <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 space-y-2.5">
+            <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-2 mb-3.5">
               <span className="text-xs font-bold text-amber-400 block">
-                طريقة التفعيل وتجديد الاشتراك:
+                وسائل التحويل المعتمدة:
               </span>
-              <p className="text-[11px] text-slate-300 leading-relaxed">
-                يتم استلام مبالغ الاشتراك وتفعيل المنظومة يدوياً عبر التواصل مع إدارة المنصة (المطور). وسائل التحويل المعتمدة:
-              </p>
               <div className="flex items-center gap-2 text-xs">
                 <span className="bg-slate-900 border border-slate-800 px-2 py-1 rounded-lg text-slate-200 font-bold">زين كاش (ZainCash)</span>
                 <span className="bg-slate-900 border border-slate-800 px-2 py-1 rounded-lg text-slate-200 font-bold">كي كارد (Qi Card)</span>
@@ -494,14 +536,25 @@ export const SaaSScreen: FC<SaaSScreenProps> = ({ settings, onUpdateSettings }) 
               </div>
             </div>
 
-            {/* زر التواصل مع المطور للتفعيل والتجديد */}
-            <button
-              onClick={handleRequestRenewalWhatsApp}
-              className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-black p-3 rounded-xl transition-all text-xs cursor-pointer shadow-lg shadow-emerald-600/20"
-            >
-              <MessageCircle className="w-4 h-4 fill-white" />
-              <span>إرسال طلب التجديد عبر واتساب المطور (07764271130)</span>
-            </button>
+            {/* أزرار الاتصال والواتساب بالإدارة */}
+            <div className="space-y-2">
+              <a
+                href={`tel:${cleanPhone}`}
+                className="w-full flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black p-3 rounded-xl transition-all text-xs sm:text-sm cursor-pointer shadow-lg shadow-amber-500/20"
+              >
+                <Phone className="w-4 h-4 fill-slate-950" />
+                <span>اتصال مباشر بالإدارة ({adminPhone})</span>
+              </a>
+
+              <button
+                type="button"
+                onClick={handleRequestRenewalWhatsApp}
+                className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-black p-3 rounded-xl transition-all text-xs sm:text-sm cursor-pointer shadow-lg shadow-emerald-600/20"
+              >
+                <MessageCircle className="w-4 h-4 fill-white" />
+                <span>مراسلة الإدارة عبر واتساب للتفعيل الفوري</span>
+              </button>
+            </div>
           </div>
 
           {/* زر النسخ الاحتياطي اليدوي للأمان */}
@@ -517,6 +570,65 @@ export const SaaSScreen: FC<SaaSScreenProps> = ({ settings, onUpdateSettings }) 
         </div>
 
       </div>
+
+      {/* بطاقة وضع واجهة البرنامج: السريع البسيط vs الكامل المتقدم */}
+      {onToggleUiMode && (
+        <div className="bg-slate-800/90 border border-slate-700 rounded-2xl p-5 shadow-lg space-y-3">
+          <div className="flex items-center justify-between border-b border-slate-700/80 pb-3">
+            <h3 className="font-bold text-sm text-white flex items-center gap-2">
+              <Sliders className="w-4 h-4 text-amber-400" />
+              <span>وضع واجهة البرنامج</span>
+            </h3>
+            <span className={`text-[11px] px-2.5 py-0.5 rounded-full font-bold border ${
+              uiMode === 'simple'
+                ? 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                : 'bg-indigo-500/15 text-indigo-300 border-indigo-500/30'
+            }`}>
+              {uiMode === 'simple' ? '⚡ الوضع السريع البسيط' : '⚙️ الوضع المتقدم الكامل'}
+            </span>
+          </div>
+
+          <p className="text-xs text-slate-300 leading-relaxed">
+            يمكنك اختيار مظهر البرنامج المناسب لعملك اليومي للتبسيط وتسهيل تجربة الاستخدام:
+          </p>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+            <div
+              onClick={() => uiMode !== 'simple' && onToggleUiMode()}
+              className={`p-3.5 rounded-xl border cursor-pointer transition-all ${
+                uiMode === 'simple'
+                  ? 'bg-amber-500/15 border-amber-500 text-white ring-1 ring-amber-500'
+                  : 'bg-slate-950/70 border-slate-800 text-slate-400 hover:border-slate-700'
+              }`}
+            >
+              <div className="flex items-center gap-2 font-bold text-xs text-amber-400 mb-1">
+                <Zap className="w-4 h-4 fill-amber-400" />
+                <span>الوضع السريع البسيط (الافتراضي)</span>
+              </div>
+              <p className="text-[11px] text-slate-300 leading-relaxed">
+                واجهة مقتضبة جداً تركز فقط على المشتركين، تسعيرة الأمبير المباشرة، القبض بلمسة واحدة، ووصل الواتساب.
+              </p>
+            </div>
+
+            <div
+              onClick={() => uiMode === 'simple' && onToggleUiMode()}
+              className={`p-3.5 rounded-xl border cursor-pointer transition-all ${
+                uiMode === 'advanced'
+                  ? 'bg-indigo-500/15 border-indigo-500 text-white ring-1 ring-indigo-500'
+                  : 'bg-slate-950/70 border-slate-800 text-slate-400 hover:border-slate-700'
+              }`}
+            >
+              <div className="flex items-center gap-2 font-bold text-xs text-indigo-400 mb-1">
+                <Sliders className="w-4 h-4" />
+                <span>الوضع الكامل المتقدم</span>
+              </div>
+              <p className="text-[11px] text-slate-300 leading-relaxed">
+                يُظهر كافة الأدوات: شاشة المصاريف والأرباح، تسعيرة الشهر الموسعة، إعدادات الشبكة المتقدمة والنسخ الاحتياطي.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* قسم إعدادات الطابعة الحرارية وتوصيل الهاتف عبر الشبكة */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4">
@@ -609,6 +721,78 @@ export const SaaSScreen: FC<SaaSScreenProps> = ({ settings, onUpdateSettings }) 
           <div className="text-[11px] text-slate-400 leading-relaxed bg-slate-950/60 p-2.5 rounded-xl border border-slate-800/80">
             💡 <strong>ملاحظة هامة:</strong> عند فتح هذا الرابط من متصفح Chrome أو Edge على هاتفك، سيتصل بنظام الجباية مباشرة، ويمكنك اقتران طابعة البلوتوث المحمولة بهاتفك والطباعة فورياً أثناء التجوال.
           </div>
+        </div>
+
+        {/* بطاقة سجل التدقيق والرقابة الميدانية (Audit Trail) */}
+        <div className="bg-slate-800/90 border border-slate-700 rounded-2xl p-5 shadow-lg space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-700/80 pb-3">
+            <div>
+              <h3 className="font-bold text-sm text-white flex items-center gap-2">
+                <History className="w-4 h-4 text-amber-400" />
+                <span>سجل التدقيق والرقابة الميدانية (Audit Trail)</span>
+              </h3>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                تتبع غير قابل للتلاعب لعمليات القبض، حذف وتعديل المشتركين، وتغيير الأسعار
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] bg-slate-900 text-slate-300 border border-slate-700 px-2.5 py-0.5 rounded-full font-bold">
+                {auditLogs.length} عملية مسجلة
+              </span>
+              <button
+                type="button"
+                onClick={handleExportAuditCSV}
+                className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-700 text-amber-400 border border-amber-500/30 text-xs px-3 py-1 rounded-xl font-bold transition-all cursor-pointer"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5" />
+                <span>تصدير Excel</span>
+              </button>
+            </div>
+          </div>
+
+          {auditLogs.length === 0 ? (
+            <div className="text-center py-6 text-slate-500 text-xs bg-slate-950/40 rounded-xl border border-slate-800">
+              لا توجد عمليات مسجلة في سجل الرقابة حتى الآن. سيتم توثيق كل عملية قبض وتعديل تلقائياً فور إجرائها.
+            </div>
+          ) : (
+            <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+              {auditLogs.slice(0, 30).map((log) => {
+                const badge = getActionLabel(log.action);
+                return (
+                  <div
+                    key={log.id}
+                    className="bg-slate-950/70 border border-slate-800/80 p-2.5 rounded-xl flex items-center justify-between gap-2 text-xs"
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${badge.color}`}>
+                        {badge.label}
+                      </span>
+                      <div className="min-w-0">
+                        <span className="font-bold text-white block truncate">
+                          {log.userName}{' '}
+                          <span className="text-[10px] text-slate-400 font-normal">
+                            ({log.userRole === 'collector' ? 'جابي' : log.userRole === 'tenant_owner' ? 'صاحب مولدة' : 'مدير'})
+                          </span>
+                        </span>
+                        {log.details && (
+                          <span className="text-[10px] text-slate-400 block truncate">
+                            {log.details.amount ? `المبلغ: ${Number(log.details.amount).toLocaleString('ar-IQ')} د.ع` : ''}
+                            {log.details.receiptNumber ? ` • وصل: ${log.details.receiptNumber}` : ''}
+                            {log.details.fullName ? ` • المشترك: ${log.details.fullName}` : ''}
+                            {log.details.title ? ` • المصروف: ${log.details.title}` : ''}
+                            {log.details.priceNormal ? ` • عادي: ${log.details.priceNormal} د.ع` : ''}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <span className="text-[10px] text-slate-500 whitespace-nowrap flex-shrink-0">
+                      {new Date(log.createdAt).toLocaleTimeString('ar-IQ', { hour: '2-digit', minute: '2-digit' })} • {new Date(log.createdAt).toLocaleDateString('ar-IQ')}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* بطاقة الأمان والنسخ الاحتياطي المحلي الشامل */}

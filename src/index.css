@@ -88,7 +88,7 @@ html.sunlight-mode .fintech-card-shadow {
   box-shadow: 0 4px 15px -1px rgba(15, 23, 42, 0.08), 0 2px 6px -1px rgba(15, 23, 42, 0.04);
 }
 
-/* تنسيقات الطباعة الحرارية للوصول 58mm / 80mm */
+/* تنسيقات الطباعة الحرارية الميدانية للوصول (58mm / 80mm) */
 @media print {
   body * {
     visibility: hidden;
@@ -99,17 +99,22 @@ html.sunlight-mode .fintech-card-shadow {
   #thermal-receipt {
     position: absolute;
     left: 0;
+    right: 0;
     top: 0;
-    width: 80mm;
-    margin: 0;
-    padding: 8px;
+    width: 58mm !important;
+    max-width: 58mm !important;
+    margin: 0 auto !important;
+    padding: 2mm 1.5mm !important;
     background: white !important;
     color: black !important;
-    font-size: 13px !important;
-    font-family: monospace, 'Courier New', sans-serif !important;
+    font-size: 11px !important;
+    line-height: 1.25 !important;
+    font-family: system-ui, -apple-system, 'Segoe UI', Tahoma, sans-serif !important;
+    box-shadow: none !important;
+    border: none !important;
   }
   @page {
-    size: auto;
+    size: 58mm auto;
     margin: 0mm;
   }
 }

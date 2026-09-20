@@ -2,6 +2,7 @@ import { useState, type FC, type FormEvent } from 'react';
 import { db } from '../db/db';
 import { supabase } from '../services/supabaseClient';
 import { hashPassword, verifyPassword, isPasswordHashed } from '../services/authSecurity';
+import { logAuditAction } from '../services/auditService';
 import type { UserAccount, TenantSettings } from '../types';
 import { Zap, Lock, Phone, User, Building, MapPin, CheckCircle2, ShieldCheck, ArrowLeft } from 'lucide-react';
 
@@ -103,6 +104,17 @@ export const AuthScreen: FC<AuthScreenProps> = ({ onLoginSuccess }) => {
               }
             }
 
+            logAuditAction({
+              tenantId: appUser.tenantId || 'system',
+              userId: appUser.id,
+              userName: appUser.fullName,
+              userRole: appUser.role,
+              action: 'login',
+              entityType: 'auth',
+              entityId: appUser.id,
+              details: { username: appUser.username, mode: 'cloud' },
+            }).catch(() => {});
+
             onLoginSuccess(appUser, appTenant);
             return;
           }
@@ -132,6 +144,18 @@ export const AuthScreen: FC<AuthScreenProps> = ({ onLoginSuccess }) => {
           const localTenant = localUser.tenantId
             ? await db.settings.get(localUser.tenantId)
             : undefined;
+
+          logAuditAction({
+            tenantId: localUser.tenantId || 'system',
+            userId: localUser.id,
+            userName: localUser.fullName,
+            userRole: localUser.role,
+            action: 'login',
+            entityType: 'auth',
+            entityId: localUser.id,
+            details: { username: localUser.username, mode: 'local_offline' },
+          }).catch(() => {});
+
           onLoginSuccess(localUser, localTenant);
           return;
         }

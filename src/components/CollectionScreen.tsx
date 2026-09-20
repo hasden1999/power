@@ -7,12 +7,14 @@ import {
   roundIQD,
   calculateUnitPrice,
   syncSubscriberInvoiceForCurrentCycle,
-  syncAllMissingInvoices
+  syncAllMissingInvoices,
+  generateInvoicesForCycle
 } from '../services/billingService';
+import { logAuditAction } from '../services/auditService';
 import { ThermalReceiptModal } from './ThermalReceiptModal';
 import { BottomSheet } from './BottomSheet';
 import { bluetoothPrinter } from '../services/bluetoothPrinter';
-import type { Subscriber, Invoice, Payment, TenantSettings } from '../types';
+import type { Subscriber, Invoice, Payment, TenantSettings, BillingCycle, UserAccount } from '../types';
 import {
   Search,
   CheckCircle,
@@ -29,19 +31,22 @@ import {
   X,
   LayoutGrid,
   List,
-  Percent
+  Percent,
+  Pencil
 } from 'lucide-react';
 
 interface CollectionScreenProps {
   tenantId: string;
   settings?: TenantSettings;
   onRefreshSync: () => void;
+  currentUser?: UserAccount;
 }
 
 export const CollectionScreen: FC<CollectionScreenProps> = ({
   tenantId,
   settings,
   onRefreshSync,
+  currentUser,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedStreet, setSelectedStreet] = useState<string>('all');
@@ -58,7 +63,9 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
   // نوافذ الدفع والتأكيد
   const [payingSub, setPayingSub] = useState<{ sub: Subscriber; invoice?: Invoice } | null>(null);
   const [customAmount, setCustomAmount] = useState<string>('');
-  const [collectorName, setCollectorName] = useState<string>(settings?.ownerName || 'الجابي الميداني');
+  const [collectorName, setCollectorName] = useState<string>(
+    currentUser?.fullName || currentUser?.username || settings?.ownerName || 'الجابي الميداني'
+  );
   const [paymentNote, setPaymentNote] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -102,6 +109,94 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
       });
     }
   }, [tenantId, subscribers.length]);
+
+  // نافذة تعديل سعر الأمبير السريعة من شاشة التحصيل المباشرة
+  const [isPriceModalOpen, setIsPriceModalOpen] = useState(false);
+  const [inputPriceNormal, setInputPriceNormal] = useState<string>('12000');
+  const [inputPriceGold, setInputPriceGold] = useState<string>('20000');
+  const [inputPriceNight, setInputPriceNight] = useState<string>('8000');
+  const [isSavingPrice, setIsSavingPrice] = useState(false);
+
+  useEffect(() => {
+    if (latestCycle) {
+      setInputPriceNormal(latestCycle.pricePerAmpereNormal.toString());
+      setInputPriceGold(latestCycle.pricePerAmpereGold.toString());
+      setInputPriceNight(latestCycle.pricePerAmpereNight.toString());
+    } else if (settings) {
+      setInputPriceNormal(settings.defaultPriceNormal?.toString() || '12000');
+      setInputPriceGold(settings.defaultPriceGold?.toString() || '20000');
+      setInputPriceNight('8000');
+    }
+  }, [latestCycle, settings]);
+
+  const handleSaveQuickPricing = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (currentUser?.role === 'collector') {
+      alert('عذراً، تعديل التسعيرة من صلاحيات صاحب المولدة فقط.');
+      return;
+    }
+
+    const pNormal = parseFloat(inputPriceNormal);
+    const pGold = parseFloat(inputPriceGold) || pNormal;
+    const pNight = parseFloat(inputPriceNight) || pNormal;
+
+    if (isNaN(pNormal) || pNormal < 0) {
+      alert('يرجى كتابة سعر صحيح للأمبير');
+      return;
+    }
+
+    try {
+      setIsSavingPrice(true);
+      const currentDate = new Date();
+      const currentMonth = latestCycle?.month || currentDate.getMonth() + 1;
+      const currentYear = latestCycle?.year || currentDate.getFullYear();
+      const cycleId = latestCycle?.id || `cycle-${currentYear}-${currentMonth}`;
+
+      const cycleData: BillingCycle = {
+        id: cycleId,
+        tenantId,
+        month: currentMonth,
+        year: currentYear,
+        pricePerAmpereNormal: pNormal,
+        pricePerAmpereGold: pGold,
+        pricePerAmpereNight: pNight,
+        issueDate: new Date().toISOString(),
+        notes: `تسعيرة شهر ${currentMonth} - ${currentYear}`,
+        isClosed: false,
+        createdAt: latestCycle?.createdAt || new Date().toISOString(),
+      };
+
+      await db.billingCycles.put(cycleData);
+      await generateInvoicesForCycle(cycleData);
+
+      // تسجيل تغيير السعر في سجل التدقيق
+      await logAuditAction({
+        tenantId,
+        userId: currentUser?.id,
+        userName: currentUser?.fullName || settings?.ownerName || 'صاحب المولدة',
+        userRole: currentUser?.role || 'tenant_owner',
+        action: 'price_changed',
+        entityType: 'billing_cycle',
+        entityId: cycleId,
+        details: {
+          month: currentMonth,
+          year: currentYear,
+          priceNormal: pNormal,
+          priceGold: pGold,
+          priceNight: pNight,
+        },
+      });
+
+      onRefreshSync();
+      setIsPriceModalOpen(false);
+      alert(`تم تحديث سعر الأمبير لشهر (${currentMonth}/${currentYear}) واحتساب كافة المشتركين فوراً! ⚡`);
+    } catch (err) {
+      console.error('خطأ في حفظ التسعيرة:', err);
+      alert('حدث خطأ أثناء حفظ التسعيرة.');
+    } finally {
+      setIsSavingPrice(false);
+    }
+  };
 
   // قائمة الشوارع الفريدة للفلتر
   const streetsList = useMemo(() => {
@@ -286,6 +381,8 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
         amount: amountNum,
         collectorName: collectorName || 'صاحب المولدة',
         notes: paymentNote || undefined,
+        userId: currentUser?.id,
+        userRole: currentUser?.role,
       });
 
       // حساب المتبقي للوصل
@@ -408,6 +505,50 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
   return (
     <div className="space-y-4 pb-12">
       
+      {/* شريط تسعيرة الأمبير المباشرة للشهر الحالي مع إمكانية التعديل بلمسة واحدة */}
+      <div className="bg-gradient-to-r from-amber-500/15 via-slate-900 to-slate-900 border border-amber-500/30 rounded-2xl p-3 sm:p-3.5 shadow-lg flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 flex-shrink-0 shadow-inner">
+            <Zap className="w-5 h-5 fill-amber-400" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-black text-amber-400 uppercase tracking-wider">
+                تسعيرة شهر {latestCycle ? `${latestCycle.month} / ${latestCycle.year}` : `${new Date().getMonth() + 1} / ${new Date().getFullYear()}`}
+              </span>
+              <span className="text-[10px] bg-amber-500/20 text-amber-300 font-bold px-1.5 py-0.5 rounded border border-amber-500/30">
+                مباشر
+              </span>
+            </div>
+            <div className="flex items-baseline gap-2 mt-0.5">
+              <span className="text-base sm:text-lg font-black text-white">
+                {latestCycle ? formatIQD(latestCycle.pricePerAmpereNormal) : '12,000 د.ع'}
+              </span>
+              <span className="text-[11px] text-slate-400">للأمبير العادي</span>
+              {latestCycle && latestCycle.pricePerAmpereGold > latestCycle.pricePerAmpereNormal && (
+                <>
+                  <span className="text-slate-600">•</span>
+                  <span className="text-xs font-bold text-amber-300">
+                    {formatIQD(latestCycle.pricePerAmpereGold)} (ذهبي)
+                  </span>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {currentUser?.role !== 'collector' && (
+          <button
+            type="button"
+            onClick={() => setIsPriceModalOpen(true)}
+            className="flex items-center justify-center gap-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 px-3.5 py-2 rounded-xl text-xs font-black transition-all shadow-md shadow-amber-500/20 cursor-pointer active:scale-95 flex-shrink-0"
+          >
+            <Pencil className="w-3.5 h-3.5" />
+            <span>تعديل سعر الأمبير لهذا الشهر</span>
+          </button>
+        )}
+      </div>
+
       {/* 1. لوحة المؤشرات المالية المدمجة (Fintech Summary Bar) */}
       <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3 sm:p-3.5 shadow-lg backdrop-blur-sm">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3">
@@ -1030,6 +1171,97 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
           remainingDebt={lastPaymentReceipt.remaining}
           settings={settings}
         />
+      )}
+
+      {/* نافذة تعديل تسعيرة الأمبير المباشرة والسريعة */}
+      {isPriceModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-black/80 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl flex flex-col">
+            <div className="p-4 border-b border-slate-800 bg-slate-950 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Zap className="w-5 h-5 text-amber-400 fill-amber-400" />
+                <h3 className="font-bold text-base text-white">
+                  تحديد سعر الأمبير (شهر {latestCycle ? `${latestCycle.month} / ${latestCycle.year}` : `${new Date().getMonth() + 1} / ${new Date().getFullYear()}`})
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsPriceModalOpen(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveQuickPricing} className="p-4 space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  سعر الأمبير العادي (د.ع) *
+                </label>
+                <input
+                  type="number"
+                  step="500"
+                  required
+                  value={inputPriceNormal}
+                  onChange={(e) => setInputPriceNormal(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-base text-amber-400 font-bold focus:outline-none focus:border-amber-500"
+                  placeholder="12000"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    سعر الخط الذهبي (24 ساعة)
+                  </label>
+                  <input
+                    type="number"
+                    step="500"
+                    value={inputPriceGold}
+                    onChange={(e) => setInputPriceGold(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white font-bold focus:outline-none focus:border-amber-500"
+                    placeholder="20000"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    سعر الخط المسائي
+                  </label>
+                  <input
+                    type="number"
+                    step="500"
+                    value={inputPriceNight}
+                    onChange={(e) => setInputPriceNight(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white font-bold focus:outline-none focus:border-amber-500"
+                    placeholder="8000"
+                  />
+                </div>
+              </div>
+
+              <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-3 text-[11px] text-amber-200/90 leading-relaxed">
+                ⚡ بمجرد الضغط على حفظ، سيتم إعادة احتساب تكلفة الاشتراك وتحديث فواتير جميع المشتركين تلقائياً وبشكل فوري في شاشة الجباية.
+              </div>
+
+              <div className="pt-2 flex gap-2">
+                <button
+                  type="submit"
+                  disabled={isSavingPrice}
+                  className="flex-1 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-black py-2.5 px-4 rounded-xl text-sm transition-all cursor-pointer shadow-lg shadow-amber-500/20 active:scale-95"
+                >
+                  {isSavingPrice ? 'جاري الاحتساب والتحديث...' : 'حفظ واحتساب الفواتير فوراً ⚡'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsPriceModalOpen(false)}
+                  className="px-4 py-2.5 text-xs text-slate-400 hover:text-white rounded-xl hover:bg-slate-800"
+                >
+                  إلغاء
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
 
     </div>

@@ -3,7 +3,8 @@ import { useState, useEffect, useMemo, type FC } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/db';
 import { formatIQD, generateInvoicesForCycle } from '../services/billingService';
-import type { BillingCycle, TenantSettings } from '../types';
+import { logAuditAction } from '../services/auditService';
+import type { BillingCycle, TenantSettings, UserAccount } from '../types';
 import {
   Calendar,
   Zap,
@@ -18,13 +19,14 @@ interface PricingScreenProps {
   tenantId: string;
   settings?: TenantSettings;
   onRefreshSync: () => void;
+  currentUser?: UserAccount;
 }
 
 export const PricingScreen: FC<PricingScreenProps> = ({
-
   tenantId,
   settings,
   onRefreshSync,
+  currentUser,
 }) => {
   const currentDate = new Date();
   const [selectedMonth, setSelectedMonth] = useState<number>(currentDate.getMonth() + 1);
@@ -134,6 +136,25 @@ export const PricingScreen: FC<PricingScreenProps> = ({
 
       // توليد الفواتير لجميع المشتركين
       const count = await generateInvoicesForCycle(cycleData);
+
+      // تسجيل العملية في سجل التدقيق والرقابة
+      await logAuditAction({
+        tenantId,
+        userId: currentUser?.id,
+        userName: currentUser?.fullName || settings?.ownerName || 'صاحب المولدة',
+        userRole: currentUser?.role || 'tenant_owner',
+        action: 'price_changed',
+        entityType: 'billing_cycle',
+        entityId: cycleId,
+        details: {
+          month: selectedMonth,
+          year: selectedYear,
+          priceNormal: pNormal,
+          priceGold: pGold || pNormal,
+          priceNight: pNight || pNormal,
+          generatedInvoicesCount: count,
+        },
+      });
 
       onRefreshSync();
       setSuccessMessage(

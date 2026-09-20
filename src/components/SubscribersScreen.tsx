@@ -11,7 +11,8 @@ import {
   syncAllMissingInvoices,
   getLatestActiveCycle
 } from '../services/billingService';
-import type { Subscriber, SubscriptionType, Payment, Invoice } from '../types';
+import { logAuditAction } from '../services/auditService';
+import type { Subscriber, SubscriptionType, Payment, Invoice, UserAccount } from '../types';
 import {
   Plus,
   Search,
@@ -34,9 +35,10 @@ import {
 
 interface SubscribersScreenProps {
   tenantId: string;
+  currentUser?: UserAccount;
 }
 
-export const SubscribersScreen: FC<SubscribersScreenProps> = ({ tenantId }) => {
+export const SubscribersScreen: FC<SubscribersScreenProps> = ({ tenantId, currentUser }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedStreet, setSelectedStreet] = useState<string>('all');
   
@@ -196,6 +198,9 @@ export const SubscribersScreen: FC<SubscribersScreenProps> = ({ tenantId }) => {
     const fixedNum = fixedPrice ? parseFloat(fixedPrice) : undefined;
     const now = new Date().toISOString();
 
+    const isCollector = currentUser?.role === 'collector';
+    const cleanOpenBal = isCollector && editingSub ? editingSub.openingBalance : openBalNum;
+
     if (editingSub) {
       // تعديل
       const updatedSub: Subscriber = {
@@ -207,7 +212,7 @@ export const SubscribersScreen: FC<SubscribersScreenProps> = ({ tenantId }) => {
         amperes: ampNum,
         subscriptionType,
         fixedPrice: fixedNum,
-        openingBalance: openBalNum,
+        openingBalance: cleanOpenBal,
         notes: notes.trim() || undefined,
         isActive,
         updatedAt: now,
@@ -226,6 +231,23 @@ export const SubscribersScreen: FC<SubscribersScreenProps> = ({ tenantId }) => {
         attempts: 0,
       });
 
+      // تسجيل العملية في سجل التدقيق والرقابة
+      await logAuditAction({
+        tenantId,
+        userId: currentUser?.id,
+        userName: currentUser?.fullName || 'مستخدم النظام',
+        userRole: currentUser?.role || 'tenant_owner',
+        action: 'update',
+        entityType: 'subscriber',
+        entityId: editingSub.id,
+        details: {
+          fullName: updatedSub.fullName,
+          breakerNumber: updatedSub.breakerNumber,
+          amperes: updatedSub.amperes,
+          openingBalance: updatedSub.openingBalance,
+        },
+      });
+
       // مزامنة فورية واحتساب فوري لفاتورة الدورة الحالية (تعديل عدد الأمبيرات في وسط الشهر)
       if (isActive) {
         await syncSubscriberInvoiceForCurrentCycle(updatedSub);
@@ -242,7 +264,7 @@ export const SubscribersScreen: FC<SubscribersScreenProps> = ({ tenantId }) => {
         amperes: ampNum,
         subscriptionType,
         fixedPrice: fixedNum,
-        openingBalance: openBalNum,
+        openingBalance: cleanOpenBal,
         notes: notes.trim() || undefined,
         isActive,
         createdAt: now,
@@ -262,6 +284,23 @@ export const SubscribersScreen: FC<SubscribersScreenProps> = ({ tenantId }) => {
         attempts: 0,
       });
 
+      // تسجيل العملية في سجل التدقيق والرقابة
+      await logAuditAction({
+        tenantId,
+        userId: currentUser?.id,
+        userName: currentUser?.fullName || 'مستخدم النظام',
+        userRole: currentUser?.role || 'tenant_owner',
+        action: 'create',
+        entityType: 'subscriber',
+        entityId: newSub.id,
+        details: {
+          fullName: newSub.fullName,
+          breakerNumber: newSub.breakerNumber,
+          amperes: newSub.amperes,
+          openingBalance: newSub.openingBalance,
+        },
+      });
+
       // توليد واحتساب فاتورة فورية للشهر الحالي للمشترك الجديد
       if (isActive) {
         await syncSubscriberInvoiceForCurrentCycle(newSub);
@@ -271,11 +310,46 @@ export const SubscribersScreen: FC<SubscribersScreenProps> = ({ tenantId }) => {
     setIsModalOpen(false);
   };
 
-  // حذف مشترك
+  // حذف مشترك (محظور على الجابي لحماية البيانات والديون)
   const handleDeleteSubscriber = async (sub: Subscriber) => {
+    if (currentUser?.role === 'collector') {
+      alert('عذراً، لا يمتلك الجابي صلاحية حذف المشتركين. هذه الصلاحية محصورة بصاحب المولدة فقط لمنع التلاعب بالديون.');
+      return;
+    }
+
     if (confirm(`هل أنت متأكد من حذف المشترك (${sub.fullName})؟ سيتم مسح بياناته من المنظومة.`)) {
+      const now = new Date().toISOString();
       await db.subscribers.delete(sub.id);
-      // مسح فواتيره المرتبطة
+
+      // تسجيل الحذف في سجل التدقيق والرقابة
+      await logAuditAction({
+        tenantId,
+        userId: currentUser?.id,
+        userName: currentUser?.fullName || 'صاحب المولدة',
+        userRole: currentUser?.role || 'tenant_owner',
+        action: 'delete',
+        entityType: 'subscriber',
+        entityId: sub.id,
+        details: {
+          fullName: sub.fullName,
+          breakerNumber: sub.breakerNumber,
+          phone: sub.phone,
+          openingBalance: sub.openingBalance,
+        },
+      });
+
+      // تسجيل الحذف في طابور المزامنة للسحابة
+      await db.syncQueue.add({
+        id: `sync-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
+        action: 'delete',
+        entity: 'subscribers',
+        entityId: sub.id,
+        payload: { id: sub.id },
+        createdAt: now,
+        attempts: 0,
+      });
+
+      // مسح فواتيره المرتبطة محلياً
       const relatedInvoices = await db.invoices.where('subscriberId').equals(sub.id).toArray();
       for (const inv of relatedInvoices) {
         await db.invoices.delete(inv.id);
@@ -306,6 +380,21 @@ export const SubscribersScreen: FC<SubscribersScreenProps> = ({ tenantId }) => {
       payload: updatedSub,
       createdAt: now,
       attempts: 0,
+    });
+
+    // تسجيل العملية في سجل التدقيق
+    await logAuditAction({
+      tenantId,
+      userId: currentUser?.id,
+      userName: currentUser?.fullName || 'مستخدم النظام',
+      userRole: currentUser?.role || 'tenant_owner',
+      action: 'update',
+      entityType: 'subscriber',
+      entityId: sub.id,
+      details: {
+        action: nextActive ? 'تفعيل الخط' : 'إيقاف الخط',
+        fullName: sub.fullName,
+      },
     });
 
     // إذا تمت إعادة تفعيل المشترك، يتم توليد/تحديث فاتورته فوراً
@@ -734,14 +823,16 @@ export const SubscribersScreen: FC<SubscribersScreenProps> = ({ tenantId }) => {
                     <Edit2 className="w-4 h-4" />
                   </button>
 
-                  {/* حذف */}
-                  <button
-                    onClick={() => handleDeleteSubscriber(sub)}
-                    className="p-1.5 rounded-lg border border-rose-500/30 text-rose-400 hover:bg-rose-500/20 transition-colors"
-                    title="حذف المشترك نهائياً"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                  {/* حذف - خاص بصاحب المولدة لمنع التلاعب */}
+                  {currentUser?.role !== 'collector' && (
+                    <button
+                      onClick={() => handleDeleteSubscriber(sub)}
+                      className="p-1.5 rounded-lg border border-rose-500/30 text-rose-400 hover:bg-rose-500/20 transition-colors"
+                      title="حذف المشترك نهائياً"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
                 </div>
 
               </div>
@@ -882,14 +973,22 @@ export const SubscribersScreen: FC<SubscribersScreenProps> = ({ tenantId }) => {
                   <div>
                     <label className="block text-xs font-semibold text-slate-300 mb-1">
                       ديون سابقة متبقية (رصيد افتتاحي)
+                      {currentUser?.role === 'collector' && (
+                        <span className="text-[10px] text-amber-400 font-normal mr-1.5">(خاص بصاحب المولدة)</span>
+                      )}
                     </label>
                     <input
                       type="number"
                       step="1000"
                       placeholder="0"
+                      disabled={currentUser?.role === 'collector'}
                       value={openingBalance}
                       onChange={(e) => setOpeningBalance(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm text-rose-400 font-bold focus:outline-none focus:border-amber-500"
+                      className={`w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm font-bold focus:outline-none focus:border-amber-500 ${
+                        currentUser?.role === 'collector'
+                          ? 'text-slate-500 opacity-60 cursor-not-allowed'
+                          : 'text-rose-400'
+                      }`}
                     />
                   </div>
                 )}

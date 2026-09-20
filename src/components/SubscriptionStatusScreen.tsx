@@ -1,5 +1,5 @@
 import { useState, type FC } from 'react';
-import { ShieldAlert, Clock, Ban, RefreshCw, LogOut, MessageCircle, CheckCircle2 } from 'lucide-react';
+import { ShieldAlert, Clock, Ban, RefreshCw, LogOut, MessageCircle, CheckCircle2, Phone } from 'lucide-react';
 import { syncAllWithCloud } from '../services/syncService';
 import type { TenantSettings, UserAccount } from '../types';
 
@@ -21,6 +21,9 @@ export const SubscriptionStatusScreen: FC<SubscriptionStatusScreenProps> = ({
   const [isChecking, setIsChecking] = useState(false);
   const [checkMsg, setCheckMsg] = useState<string | null>(null);
   const [selectedPlan, setSelectedPlan] = useState<'monthly' | 'yearly'>('monthly');
+
+  const cleanPhone = adminPhone.trim().replace(/\s+/g, '').replace(/-/g, '');
+  const waPhone = cleanPhone.startsWith('07') ? '964' + cleanPhone.substring(1) : cleanPhone;
 
   const isBlocked = tenant.isBlocked;
   const isPending = tenant.subscriptionStatus === 'pending_activation';
@@ -46,11 +49,6 @@ export const SubscriptionStatusScreen: FC<SubscriptionStatusScreenProps> = ({
   };
 
   const handleContactWhatsApp = () => {
-    let cleanPhone = adminPhone.trim().replace(/\s+/g, '').replace(/-/g, '');
-    if (cleanPhone.startsWith('07')) {
-      cleanPhone = '964' + cleanPhone.substring(1);
-    }
-
     let reasonText = 'تفعيل اشتراكي الجديد';
     if (isExpired) {
       reasonText = isTrial ? 'الاشتراك بعد انتهاء الفترة التجريبية (7 أيام)' : 'تجديد اشتراكي المنتهي';
@@ -66,7 +64,7 @@ export const SubscriptionStatusScreen: FC<SubscriptionStatusScreenProps> = ({
 أرغب بـ ${reasonText} للاشتراك ${planType}.
 يرجى تزويدي برقم محفظة زين كاش أو كي كارد لإتمام التحويل والتفعيل. شكراً جزيلاً!`;
 
-    window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`, '_blank');
+    window.open(`https://wa.me/${waPhone}?text=${encodeURIComponent(message)}`, '_blank');
   };
 
   return (
@@ -188,15 +186,27 @@ export const SubscriptionStatusScreen: FC<SubscriptionStatusScreenProps> = ({
           </div>
         </div>
 
-        {/* أزرار الإجراءات */}
+        {/* أزرار الإجراءات والتواصل مع الأدمن */}
         <div className="space-y-2.5">
+          <a
+            href={`tel:${cleanPhone}`}
+            className="w-full flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black py-3 px-4 rounded-2xl text-sm transition-all shadow-lg shadow-amber-500/20 cursor-pointer"
+          >
+            <Phone className="w-5 h-5 fill-slate-950" />
+            <span>اتصال هاتفي مباشر بالإدارة ({adminPhone})</span>
+          </a>
+
           <button
             onClick={handleContactWhatsApp}
             className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-black py-3 px-4 rounded-2xl text-sm transition-all shadow-lg shadow-emerald-600/20 cursor-pointer"
           >
             <MessageCircle className="w-5 h-5 fill-white" />
-            <span>طلب الاشتراك ({selectedPlan === 'yearly' ? 'السنوي 150,000 د.ع' : 'الشهري 15,000 د.ع'}) عبر واتساب</span>
+            <span>طلب تفعيل الاشتراك عبر واتساب</span>
           </button>
+
+          <p className="text-[11px] text-slate-400 leading-relaxed bg-slate-950/60 p-2.5 rounded-xl border border-slate-800">
+            🛡️ السيرفرات والمزامنة السحابية وقواعد البيانات مؤمنة وتتم إدارتها مركزياً بواسطة إدارة المنصة، ويتم تفعيل حسابكم فوراً بمجرد التواصل.
+          </p>
 
           <button
             onClick={handleCheckStatus}

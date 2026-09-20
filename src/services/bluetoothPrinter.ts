@@ -1,6 +1,10 @@
-// خدمة الطباعة الحرارية المباشرة عبر البلوتوث (Web Bluetooth ESC/POS)
 import type { Subscriber, Payment, TenantSettings } from '../types';
 import { formatIQD } from './billingService';
+import {
+  processLineForThermal,
+  renderReceiptToCanvas,
+  canvasToEscPosRaster,
+} from '../utils/arabicThermal';
 
 // تعريف أنواع Web Bluetooth للمتصفح إذا لم تكن مضمنة في TypeScript
 declare global {
@@ -23,9 +27,10 @@ class BluetoothPrinterService {
   // الاتصال بطابعة البلوتوث الحرارية
   async connect(): Promise<boolean> {
     if (!this.isSupported()) {
-      throw new Error('ميزة بلوتوث المتصفح (Web Bluetooth) تشترط الدخول عبر رابط HTTPS مشفر (مثل https://192.168.0.112:5173). للتجاوز الفوري: يمكنك الضغط على زر "طباعة النظام (حرارية)" المتاح فوراً بدون أي قيود.');
+      throw new Error(
+        'ميزة بلوتوث المتصفح (Web Bluetooth) تشترط الدخول عبر رابط HTTPS مشفر (مثل https://192.168.0.112:5173). للتجاوز الفوري: يمكنك الضغط على زر "طباعة النظام (حرارية)" المتاح فوراً بدون أي قيود.'
+      );
     }
-
 
     try {
       // البحث عن الطابعة الحرارية
@@ -66,7 +71,7 @@ class BluetoothPrinterService {
   }
 
   // إرسال حزم البيانات للطابعة مع تقسيم الحزم (Chunking) لتفادي فيض الذاكرة (Buffer Overflow)
-  private async sendData(data: Uint8Array): Promise<void> {
+  async sendData(data: Uint8Array): Promise<void> {
     if (!this.characteristic) {
       const connected = await this.connect();
       if (!connected || !this.characteristic) {
@@ -87,8 +92,45 @@ class BluetoothPrinterService {
     }
   }
 
-  // طباعة وصل حراري كامل للمشترك
+  /**
+   * طباعة وصل حراري كامل للمشترك:
+   * الوضع الافتراضي 'bitmap': يحول الوصل لصورة نقطية 1-Bit عبر Canvas
+   * ويضمن خروج الخط العربي والشعار دون أي اعتماد على سوفتوير الطابعة (حل بنسبة 100%).
+   * وضع 'text': يستخدم إعادة تشكيل الحروف العربية (Arabic Reshaping & BiDi).
+   */
   async printReceipt(
+    subscriber: Subscriber,
+    payment: Payment,
+    remainingDebt: number,
+    settings?: TenantSettings,
+    mode: 'bitmap' | 'text' = 'bitmap'
+  ): Promise<void> {
+    if (mode === 'bitmap') {
+      try {
+        await this.printReceiptBitmap(subscriber, payment, remainingDebt, settings);
+        return;
+      } catch (err) {
+        console.warn('تعذرت الطباعة النقطية، جاري التراجع للطباعة النصية المشكلة:', err);
+      }
+    }
+
+    await this.printReceiptText(subscriber, payment, remainingDebt, settings);
+  }
+
+  // 1. الطباعة النقطية الصورية (Canvas Bitmap ESC/POS - المضمونة 100% للسوق العراقي)
+  async printReceiptBitmap(
+    subscriber: Subscriber,
+    payment: Payment,
+    remainingDebt: number,
+    settings?: TenantSettings
+  ): Promise<void> {
+    const canvas = renderReceiptToCanvas(subscriber, payment, remainingDebt, settings, 384);
+    const buffer = canvasToEscPosRaster(canvas);
+    await this.sendData(buffer);
+  }
+
+  // 2. الطباعة النصية المباشرة مع إعادة التشكيل العربي (Arabic Reshaping & BiDi)
+  async printReceiptText(
     subscriber: Subscriber,
     payment: Payment,
     remainingDebt: number,
@@ -112,48 +154,51 @@ class BluetoothPrinterService {
     // 2. محاذاة في الوسط (ESC a 1)
     commands.push(0x1b, 0x61, 0x01);
 
-    // 3. تكبير الخط وتغميقه للعنوان (GS ! 0x11, ESC E 1)
+    // 3. العنوان وتغميق
     commands.push(0x1b, 0x45, 0x01);
-    this.appendString(commands, `${generatorName}\n`);
+    this.appendArabicLine(commands, `${generatorName}`);
     commands.push(0x1b, 0x45, 0x00);
 
-    this.appendString(commands, `هاتف: ${ownerPhone}\n`);
+    if (ownerPhone) {
+      this.appendArabicLine(commands, `هاتف: ${ownerPhone}`);
+    }
     this.appendString(commands, '================================\n');
-    this.appendString(commands, '*** وصل قبض كهرباء أهلية ***\n');
+    this.appendArabicLine(commands, '*** وصل قبض كهرباء أهلية ***');
     this.appendString(commands, '--------------------------------\n');
 
-    // 4. محاذاة لليمين / النص العادي (ESC a 0)
-    commands.push(0x1b, 0x61, 0x00);
-    this.appendString(commands, `رقم الوصل: ${payment.receiptNumber}\n`);
-    this.appendString(commands, `التاريخ  : ${dateFormatted}\n`);
-    this.appendString(commands, `المشترك  : ${subscriber.fullName}\n`);
-    this.appendString(commands, `العنوان  : ${subscriber.street}\n`);
-    this.appendString(commands, `رقم القاطع: ${subscriber.breakerNumber}\n`);
-    this.appendString(commands, `الامبيرات : ${subscriber.amperes} امبير\n`);
+    // 4. محاذاة لليمين للنص العادي
+    commands.push(0x1b, 0x61, 0x02); // محاذاة لليمين لطابعات تدعمها، أو 0x00 مع النص المعكوس
+    this.appendArabicLine(commands, `رقم السند: ${payment.receiptNumber}`);
+    this.appendArabicLine(commands, `التاريخ  : ${dateFormatted}`);
+    this.appendArabicLine(commands, `المشترك  : ${subscriber.fullName}`);
+    this.appendArabicLine(commands, `العنوان  : ${subscriber.street || 'غير محدد'}`);
+    this.appendArabicLine(commands, `رقم القاطع: ${subscriber.breakerNumber || 'غير محدد'}`);
+    this.appendArabicLine(commands, `الامبيرات : ${subscriber.amperes} امبير`);
     this.appendString(commands, '--------------------------------\n');
 
     // 5. المبالغ المالية بخط عريض
     commands.push(0x1b, 0x45, 0x01);
-    this.appendString(commands, `المبلغ الواصل : ${formatIQD(payment.amount)}\n`);
+    this.appendArabicLine(commands, `المبلغ الواصل : ${formatIQD(payment.amount)}`);
     commands.push(0x1b, 0x45, 0x00);
 
-    this.appendString(
+    this.appendArabicLine(
       commands,
-      `المتبقي بذمته : ${remainingDebt > 0 ? formatIQD(remainingDebt) : '0 د.ع (خالص)'}\n`
+      `المتبقي بذمته : ${remainingDebt > 0 ? formatIQD(remainingDebt) : '0 د.ع (خالص)'}`
     );
 
     if (payment.notes) {
-      this.appendString(commands, `ملاحظات: ${payment.notes}\n`);
+      this.appendArabicLine(commands, `ملاحظات: ${payment.notes}`);
     }
 
     this.appendString(commands, '================================\n');
 
-    // 6. تذييل وتغذية ورق وقص
+    // 6. تذييل
     commands.push(0x1b, 0x61, 0x01);
-    this.appendString(commands, `المحصل: ${payment.collectorName}\n`);
-    this.appendString(commands, 'شكرا لالتزامكم بالتسديد\n\n\n');
+    this.appendArabicLine(commands, `المحصل: ${payment.collectorName}`);
+    this.appendArabicLine(commands, 'شكرا لالتزامكم بالتسديد');
+    this.appendString(commands, '\n\n\n');
 
-    // تغذية ورق وقطع (GS V 66 0)
+    // تغذية ورق وقص
     commands.push(0x1d, 0x56, 0x42, 0x00);
 
     const buffer = new Uint8Array(commands);
@@ -166,13 +211,13 @@ class BluetoothPrinterService {
     commands.push(0x1b, 0x40); // Init
     commands.push(0x1b, 0x61, 0x01); // Center
     commands.push(0x1b, 0x45, 0x01); // Bold on
-    this.appendString(commands, `*** فحص الطابعة الحرارية ***\n`);
-    this.appendString(commands, `${generatorName}\n`);
+    this.appendArabicLine(commands, '*** فحص الطابعة الحرارية ***');
+    this.appendArabicLine(commands, `${generatorName}`);
     commands.push(0x1b, 0x45, 0x00); // Bold off
     this.appendString(commands, '--------------------------------\n');
-    this.appendString(commands, 'الاتصال عبر البلوتوث يعمل بنجاح!\n');
-    this.appendString(commands, `الوقت: ${new Date().toLocaleTimeString('ar-IQ')}\n`);
-    this.appendString(commands, 'جاهز لطباعة وصولات الجباية\n');
+    this.appendArabicLine(commands, 'الاتصال عبر البلوتوث يعمل بنجاح!');
+    this.appendArabicLine(commands, `الوقت: ${new Date().toLocaleTimeString('ar-IQ')}`);
+    this.appendArabicLine(commands, 'جاهز لطباعة وصولات الجباية');
     this.appendString(commands, '================================\n\n\n');
     commands.push(0x1d, 0x56, 0x42, 0x00); // Cut
 
@@ -180,7 +225,13 @@ class BluetoothPrinterService {
     await this.sendData(buffer);
   }
 
-  // تحويل النصوص إلى ترميز مصفوفة بايتات
+  // إضافة سطر عربي معاد تشكيله وضبط اتجاهه
+  private appendArabicLine(commands: number[], text: string) {
+    const processed = processLineForThermal(text) + '\n';
+    this.appendString(commands, processed);
+  }
+
+  // تحويل النصوص إلى مصفوفة بايتات
   private appendString(commands: number[], text: string) {
     const encoder = new TextEncoder();
     const bytes = encoder.encode(text);
@@ -191,7 +242,7 @@ class BluetoothPrinterService {
 
   // قطع الاتصال
   disconnect() {
-    if (this.device && this.device.gatt.connected) {
+    if (this.device && this.device.gatt?.connected) {
       this.device.gatt.disconnect();
     }
     this.device = null;
@@ -200,3 +251,4 @@ class BluetoothPrinterService {
 }
 
 export const bluetoothPrinter = new BluetoothPrinterService();
+

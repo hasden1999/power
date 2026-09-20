@@ -248,124 +248,313 @@ function dbToExpense(r: any): Expense {
   };
 }
 
-// المزامنة الحقيقية الشاملة مع سحابة Supabase
-export async function syncAllWithCloud(activeTenantId?: string) {
-  if (!navigator.onLine) return;
+function getTableName(entity: string): string {
+  switch (entity) {
+    case 'subscribers':
+      return 'subscribers';
+    case 'invoices':
+      return 'invoices';
+    case 'payments':
+      return 'payments';
+    case 'cycles':
+      return 'billing_cycles';
+    case 'expenses':
+      return 'expenses';
+    case 'tenants':
+      return 'tenants';
+    case 'users':
+      return 'users';
+    case 'auditLogs':
+      return 'audit_logs';
+    case 'ledger':
+      return 'ledger_entries';
+    default:
+      return entity;
+  }
+}
+
+function mapEntityToDb(entity: string, payload: any): any {
+  switch (entity) {
+    case 'subscribers':
+      return subscriberToDb(payload);
+    case 'invoices':
+      return invoiceToDb(payload);
+    case 'payments':
+      return paymentToDb(payload);
+    case 'cycles':
+      return cycleToDb(payload);
+    case 'expenses':
+      return expenseToDb(payload);
+    case 'tenants':
+      return tenantToDb(payload);
+    case 'users':
+      return userToDb(payload);
+    case 'auditLogs':
+      return {
+        id: payload.id,
+        tenant_id: payload.tenantId,
+        user_id: payload.userId,
+        user_name: payload.userName,
+        user_role: payload.userRole,
+        action: payload.action,
+        entity_type: payload.entityType,
+        entity_id: payload.entityId,
+        details: payload.details,
+        created_at: payload.createdAt,
+      };
+    case 'ledger':
+      return {
+        id: payload.id,
+        tenant_id: payload.tenantId,
+        transaction_type: payload.transactionType,
+        reference_id: payload.referenceId,
+        subscriber_id: payload.subscriberId,
+        account: payload.account,
+        debit: payload.debit,
+        credit: payload.credit,
+        description: payload.description,
+        created_at: payload.createdAt,
+      };
+    default:
+      return payload;
+  }
+}
+
+/**
+ * فض النزاع للمشتركين (Subscriber Conflict Resolution):
+ * - البيانات الشخصية والملاحظات: تأخذ الأحدث زمنياً (Last-Writer-Wins).
+ * - الديون السابقة (openingBalance): الحفاظ على القيمة الأكبر لحماية حقوق المولدة.
+ */
+export function resolveSubscriberConflict(local: Subscriber, remote: Subscriber): Subscriber {
+  const localTime = new Date(local.updatedAt || local.createdAt || 0).getTime();
+  const remoteTime = new Date(remote.updatedAt || remote.createdAt || 0).getTime();
+
+  const isRemoteNewer = remoteTime > localTime;
+  const base = isRemoteNewer ? remote : local;
+
+  return {
+    ...base,
+    openingBalance: Math.max(local.openingBalance || 0, remote.openingBalance || 0),
+    notes: isRemoteNewer ? remote.notes || local.notes : local.notes || remote.notes,
+    version: Math.max(local.version || 1, remote.version || 1) + 1,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * فض النزاع للفواتير (Invoice Conflict Resolution):
+ * - الفاتورة لا تفقد أي تسديدات: يتم دمج المدفوعات وتجميعها مع المدفوعات المحلية.
+ * - يتم مطابقة totalPaid مع مجموع السجلات في جدول payments لضمان سلامة الأرقام.
+ */
+export async function resolveInvoiceConflict(local: Invoice, remote: Invoice): Promise<Invoice> {
+  const localTime = new Date(local.updatedAt || local.createdAt || 0).getTime();
+  const remoteTime = new Date(remote.updatedAt || remote.createdAt || 0).getTime();
+  const isRemoteNewer = remoteTime > localTime;
+
+  const amperes = isRemoteNewer ? remote.amperes : local.amperes;
+  const unitPrice = isRemoteNewer ? remote.unitPrice : local.unitPrice;
+  const currentAmount = isRemoteNewer ? remote.currentAmount : local.currentAmount;
+  const discount = isRemoteNewer ? remote.discount || 0 : local.discount || 0;
+  const previousDebt = Math.max(local.previousDebt || 0, remote.previousDebt || 0);
+
+  const totalDue = Math.max(0, currentAmount + previousDebt - discount);
+
+  // احتساب المدفوع الفعلي استناداً لجدول الدفعات لضمان عدم ضياع أي دفعة جابي
+  const invoicePayments = await db.payments.where('invoiceId').equals(local.id).toArray();
+  const paymentsSum = invoicePayments.reduce((sum, p) => sum + (p.amount || 0), 0);
+  const totalPaid = Math.max(local.totalPaid || 0, remote.totalPaid || 0, paymentsSum);
+
+  const status = totalPaid >= totalDue ? 'paid' : totalPaid > 0 ? 'partial' : 'unpaid';
+
+  return {
+    id: local.id,
+    tenantId: local.tenantId,
+    cycleId: local.cycleId,
+    subscriberId: local.subscriberId,
+    month: local.month,
+    year: local.year,
+    amperes,
+    unitPrice,
+    currentAmount,
+    previousDebt,
+    discount,
+    totalDue,
+    totalPaid,
+    status,
+    version: Math.max(local.version || 1, remote.version || 1) + 1,
+    createdAt: local.createdAt || remote.createdAt,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * معالجة حقيقية لطابور المزامنة (Process Sync Queue Events)
+ * ترفع التغييرات الحقيقية المعلقة فقط بدلاً من طمس الجداول بالرفع الشامل
+ */
+export async function processSyncQueue(): Promise<{ processed: number; failed: number }> {
+  if (!navigator.onLine) return { processed: 0, failed: 0 };
+
+  const queueItems = await db.syncQueue.toArray();
+  if (queueItems.length === 0) return { processed: 0, failed: 0 };
+
+  // تجميع وإلغاء التكرار (Deduplication) لكل كيان لأخذ أحدث حالة
+  const latestByEntity = new Map<string, (typeof queueItems)[0]>();
+  for (const item of queueItems) {
+    const key = `${item.entity}_${item.entityId}`;
+    const existing = latestByEntity.get(key);
+    if (!existing || new Date(item.createdAt) >= new Date(existing.createdAt)) {
+      latestByEntity.set(key, item);
+    }
+  }
+
+  const successIds: string[] = [];
+  let processedCount = 0;
+  let failedCount = 0;
+
+  for (const [key, item] of latestByEntity.entries()) {
+    try {
+      const table = getTableName(item.entity);
+      if (item.action === 'delete') {
+        await supabase.from(table).delete().eq('id', item.entityId);
+      } else {
+        const payload = mapEntityToDb(item.entity, item.payload);
+        if (payload) {
+          const { error } = await supabase.from(table).upsert(payload);
+          if (error) throw error;
+        }
+      }
+
+      queueItems
+        .filter((q) => `${q.entity}_${q.entityId}` === key)
+        .forEach((q) => successIds.push(q.id));
+
+      processedCount++;
+    } catch (err) {
+      console.warn(`تعذر مزامنة عنصر من الطابور (${item.entity}:${item.entityId}):`, err);
+      failedCount++;
+      await db.syncQueue.update(item.id, { attempts: (item.attempts || 0) + 1 });
+    }
+  }
+
+  if (successIds.length > 0) {
+    await db.syncQueue.bulkDelete(successIds);
+  }
+
+  return { processed: processedCount, failed: failedCount };
+}
+
+// المزامنة الحقيقية الشاملة والمحمية بمحرك فض النزاعات
+export async function syncAllWithCloud(activeTenantId?: string): Promise<boolean> {
+  if (!navigator.onLine) return false;
 
   try {
-    // 1. رفع البيانات المحلية للسحابة (Push local to cloud)
-    const localTenants = await db.settings.toArray();
-    if (localTenants.length > 0) {
-      await supabase.from('tenants').upsert(localTenants.map(tenantToDb));
-    }
+    // 1. معالجة طابور المزامنة الحقيقي (رفع الأحداث المعلقة)
+    await processSyncQueue();
 
-    const localUsers = await db.users.toArray();
-    if (localUsers.length > 0) {
-      await supabase.from('users').upsert(localUsers.map(userToDb));
-    }
-
-    const localSubscribers = await db.subscribers.toArray();
-    if (localSubscribers.length > 0) {
-      await supabase.from('subscribers').upsert(localSubscribers.map(subscriberToDb));
-    }
-
-    const localCycles = await db.billingCycles.toArray();
-    if (localCycles.length > 0) {
-      await supabase.from('billing_cycles').upsert(localCycles.map(cycleToDb));
-    }
-
-    const localInvoices = await db.invoices.toArray();
-    if (localInvoices.length > 0) {
-      await supabase.from('invoices').upsert(localInvoices.map(invoiceToDb));
-    }
-
-    const localPayments = await db.payments.toArray();
-    if (localPayments.length > 0) {
-      await supabase.from('payments').upsert(localPayments.map(paymentToDb));
-    }
-
-    try {
-      const localExpenses = await db.expenses.toArray();
-      if (localExpenses.length > 0) {
-        await supabase.from('expenses').upsert(localExpenses.map(expenseToDb));
+    // 2. إذا لم يكن هناك طابور: رفع الدفعات غير المتزامنة إن وجدت
+    const pendingCount = await db.syncQueue.count();
+    if (pendingCount === 0) {
+      const pendingPayments = await db.payments.where('syncStatus').equals('pending').toArray();
+      if (pendingPayments.length > 0) {
+        await supabase.from('payments').upsert(pendingPayments.map(paymentToDb));
+        for (const p of pendingPayments) {
+          await db.payments.update(p.id, { syncStatus: 'synced' });
+        }
       }
-    } catch (expErr) {
-      console.warn('تخطي رفع المصاريف للسحابة مؤقتاً:', expErr);
     }
 
-    // تفريغ طابور المزامنة المعلقة بعد الرفع الناجح
-    await db.syncQueue.clear();
+    const lastSyncIso = localStorage.getItem('last_sync_iso');
+    const currentSyncIso = new Date().toISOString();
 
-    // 2. سحب أحدث البيانات من السحابة إلى التخزين المحلي (Pull cloud to local)
-    // سحب المولدات
+    // 3. سحب التعديلات من السحابة وتطبيق فض النزاع (Pull with Conflict Resolution)
+
+    // أ. سحب وتحديث المولدات
     const { data: cloudTenants } = await supabase.from('tenants').select('*');
     if (cloudTenants && cloudTenants.length > 0) {
       await db.settings.bulkPut(cloudTenants.map(dbToTenant));
     }
 
-    // سحب المستخدمين
+    // ب. سحب وتحديث المستخدمين
     const { data: cloudUsers } = await supabase.from('users').select('*');
     if (cloudUsers && cloudUsers.length > 0) {
       await db.users.bulkPut(cloudUsers.map(dbToUser));
     }
 
-    // سحب المشتركين (إذا تم تحديد مولدة نسحب مشتركيها، أو الكل)
+    // ج. سحب وتحديث المشتركين بفض النزاع
     let subQuery = supabase.from('subscribers').select('*');
-    if (activeTenantId) {
-      subQuery = subQuery.eq('tenant_id', activeTenantId);
-    }
+    if (activeTenantId) subQuery = subQuery.eq('tenant_id', activeTenantId);
+    if (lastSyncIso) subQuery = subQuery.gt('updated_at', lastSyncIso);
+
     const { data: cloudSubs } = await subQuery;
     if (cloudSubs && cloudSubs.length > 0) {
-      await db.subscribers.bulkPut(cloudSubs.map(dbToSubscriber));
+      for (const rawSub of cloudSubs) {
+        const remoteSub = dbToSubscriber(rawSub);
+        const localSub = await db.subscribers.get(remoteSub.id);
+        if (localSub) {
+          const resolved = resolveSubscriberConflict(localSub, remoteSub);
+          await db.subscribers.put(resolved);
+        } else {
+          await db.subscribers.put(remoteSub);
+        }
+      }
     }
 
-    // سحب دورات التحصيل
-    let cyclesQuery = supabase.from('billing_cycles').select('*');
-    if (activeTenantId) {
-      cyclesQuery = cyclesQuery.eq('tenant_id', activeTenantId);
+    // د. سحب وتحديث الفواتير بفض النزاع
+    let invQuery = supabase.from('invoices').select('*');
+    if (activeTenantId) invQuery = invQuery.eq('tenant_id', activeTenantId);
+    if (lastSyncIso) invQuery = invQuery.gt('updated_at', lastSyncIso);
+
+    const { data: cloudInvoices } = await invQuery;
+    if (cloudInvoices && cloudInvoices.length > 0) {
+      for (const rawInv of cloudInvoices) {
+        const remoteInv = dbToInvoice(rawInv);
+        const localInv = await db.invoices.get(remoteInv.id);
+        if (localInv) {
+          const resolved = await resolveInvoiceConflict(localInv, remoteInv);
+          await db.invoices.put(resolved);
+        } else {
+          await db.invoices.put(remoteInv);
+        }
+      }
     }
+
+    // هـ. سحب الدفعات الجديدة (Append-only)
+    let payQuery = supabase.from('payments').select('*');
+    if (activeTenantId) payQuery = payQuery.eq('tenant_id', activeTenantId);
+    if (lastSyncIso) payQuery = payQuery.gt('payment_date', lastSyncIso);
+
+    const { data: cloudPayments } = await payQuery;
+    if (cloudPayments && cloudPayments.length > 0) {
+      const newPayments = cloudPayments.map(dbToPayment);
+      await db.payments.bulkPut(newPayments);
+    }
+
+    // و. سحب دورات التحصيل
+    let cyclesQuery = supabase.from('billing_cycles').select('*');
+    if (activeTenantId) cyclesQuery = cyclesQuery.eq('tenant_id', activeTenantId);
     const { data: cloudCycles } = await cyclesQuery;
     if (cloudCycles && cloudCycles.length > 0) {
       await db.billingCycles.bulkPut(cloudCycles.map(dbToCycle));
     }
 
-    // سحب الفواتير
-    let invQuery = supabase.from('invoices').select('*');
-    if (activeTenantId) {
-      invQuery = invQuery.eq('tenant_id', activeTenantId);
-    }
-    const { data: cloudInvoices } = await invQuery;
-    if (cloudInvoices && cloudInvoices.length > 0) {
-      await db.invoices.bulkPut(cloudInvoices.map(dbToInvoice));
-    }
-
-    // سحب الدفعات
-    let payQuery = supabase.from('payments').select('*');
-    if (activeTenantId) {
-      payQuery = payQuery.eq('tenant_id', activeTenantId);
-    }
-    const { data: cloudPayments } = await payQuery;
-    if (cloudPayments && cloudPayments.length > 0) {
-      await db.payments.bulkPut(cloudPayments.map(dbToPayment));
-    }
-
-    // سحب المصاريف
+    // ز. سحب المصاريف
     try {
       let expQuery = supabase.from('expenses').select('*');
-      if (activeTenantId) {
-        expQuery = expQuery.eq('tenant_id', activeTenantId);
-      }
+      if (activeTenantId) expQuery = expQuery.eq('tenant_id', activeTenantId);
       const { data: cloudExpenses } = await expQuery;
       if (cloudExpenses && cloudExpenses.length > 0) {
         await db.expenses.bulkPut(cloudExpenses.map(dbToExpense));
       }
     } catch (expErr) {
-      console.warn('تخطي سحب المصاريف من السحابة مؤقتاً:', expErr);
+      console.warn('تخطي سحب المصاريف مؤقتاً:', expErr);
     }
+
+    // حفظ توقيت المزامنة بصيغة ISO للمزامنة التفاضلية القادمة
+    localStorage.setItem('last_sync_iso', currentSyncIso);
 
     return true;
   } catch (error) {
-    console.error('خطأ في المزامنة السحابية:', error);
+    console.error('خطأ في المزامنة السحابية الذكية:', error);
     return false;
   }
 }

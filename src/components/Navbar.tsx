@@ -1,5 +1,5 @@
 import type { FC } from 'react';
-import { Zap, Wifi, WifiOff, RefreshCw, Users, DollarSign, Calendar, Settings, LogOut, ArrowRight, Download, TrendingDown, Sun, SunMedium } from 'lucide-react';
+import { Zap, Wifi, WifiOff, RefreshCw, Users, DollarSign, Calendar, Settings, LogOut, ArrowRight, Download, TrendingDown, Sun, SunMedium, Sliders } from 'lucide-react';
 
 
 import type { SyncStatusInfo } from '../services/syncService';
@@ -18,6 +18,8 @@ interface NavbarProps {
   onOpenInstall?: () => void;
   isSunlightMode?: boolean;
   onToggleSunlightMode?: () => void;
+  uiMode?: 'simple' | 'advanced';
+  onToggleUiMode?: () => void;
 }
 
 export const Navbar: FC<NavbarProps> = ({
@@ -32,6 +34,8 @@ export const Navbar: FC<NavbarProps> = ({
   onOpenInstall,
   isSunlightMode,
   onToggleSunlightMode,
+  uiMode = 'simple',
+  onToggleUiMode,
 }) => {
   return (
     <header className="bg-slate-950/90 backdrop-blur-md border-b border-slate-800 sticky top-0 z-40">
@@ -91,7 +95,7 @@ export const Navbar: FC<NavbarProps> = ({
             }`}
           >
             <DollarSign className="w-4 h-4" />
-            شاشة التحصيل
+            {uiMode === 'simple' ? 'الجباية والقبض' : 'شاشة التحصيل'}
           </button>
 
           <button
@@ -106,45 +110,76 @@ export const Navbar: FC<NavbarProps> = ({
             المشتركين
           </button>
 
-          <button
-            onClick={() => setCurrentTab('pricing')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition-all whitespace-nowrap ${
-              currentTab === 'pricing'
-                ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20 font-bold'
-                : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
-            }`}
-          >
-            <Calendar className="w-4 h-4" />
-            تسعيرة الشهر
-          </button>
+          {uiMode === 'advanced' && currentUser.role !== 'collector' && (
+            <button
+              onClick={() => setCurrentTab('pricing')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition-all whitespace-nowrap ${
+                currentTab === 'pricing'
+                  ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20 font-bold'
+                  : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
+              }`}
+            >
+              <Calendar className="w-4 h-4" />
+              تسعيرة الشهر
+            </button>
+          )}
 
-          <button
-            onClick={() => setCurrentTab('expenses')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition-all whitespace-nowrap ${
-              currentTab === 'expenses'
-                ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20 font-bold'
-                : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
-            }`}
-          >
-            <TrendingDown className="w-4 h-4" />
-            المصاريف والأرباح
-          </button>
+          {uiMode === 'advanced' && (
+            <button
+              onClick={() => setCurrentTab('expenses')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition-all whitespace-nowrap ${
+                currentTab === 'expenses'
+                  ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20 font-bold'
+                  : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
+              }`}
+            >
+              <TrendingDown className="w-4 h-4" />
+              المصاريف والأرباح
+            </button>
+          )}
 
-          <button
-            onClick={() => setCurrentTab('saas')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition-all whitespace-nowrap ${
-              currentTab === 'saas'
-                ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20 font-bold'
-                : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
-            }`}
-          >
-            <Settings className="w-4 h-4" />
-            اشتراك النظام
-          </button>
+          {currentUser.role !== 'collector' && (
+            <button
+              onClick={() => setCurrentTab('saas')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition-all whitespace-nowrap ${
+                currentTab === 'saas'
+                  ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20 font-bold'
+                  : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
+              }`}
+            >
+              <Settings className="w-4 h-4" />
+              {uiMode === 'simple' ? 'اشتراك ودعم المولدة' : 'اشتراك النظام'}
+            </button>
+          )}
         </nav>
 
         {/* مؤشر الاتصال والمزامنة وقائمة المستخدم */}
         <div className="flex items-center gap-2 sm:gap-3">
+          {/* زر تبديل الوضع السريع البسيط والوضع المتقدم */}
+          {onToggleUiMode && (
+            <button
+              onClick={onToggleUiMode}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[11px] font-bold transition-all cursor-pointer ${
+                uiMode === 'simple'
+                  ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30 hover:bg-amber-500/20'
+                  : 'bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 hover:bg-indigo-500/20'
+              }`}
+              title={uiMode === 'simple' ? 'التبديل إلى الوضع الكامل المتقدم' : 'التبديل إلى الوضع السريع البسيط (الافتراضي)'}
+            >
+              {uiMode === 'simple' ? (
+                <>
+                  <Zap className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
+                  <span className="hidden sm:inline">الوضع البسيط</span>
+                </>
+              ) : (
+                <>
+                  <Sliders className="w-3.5 h-3.5 text-indigo-400" />
+                  <span className="hidden sm:inline">الوضع المتقدم</span>
+                </>
+              )}
+            </button>
+          )}
+
           {/* زر تبديل وضع الإضاءة النهارية للشمس المباشرة */}
           {onToggleSunlightMode && (
             <button
