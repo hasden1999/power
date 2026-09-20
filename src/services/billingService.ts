@@ -476,3 +476,221 @@ export async function recordPayment(params: {
 
   return payment;
 }
+
+/**
+ * توحيد ومعايرة النصوص العربية للبحث الذكي السريع:
+ * يعالج مشكلة الهمزات (أ، إ، آ -> ا)، والتاء المربوطة (ة -> ه)، والياء المقصورة (ى -> ي)
+ * وحذف التشكيل والتطويل والمسافات الزائدة، لضمان تطابق 100% عند كتابة أي حرف
+ */
+export function normalizeArabic(text: string): string {
+  if (!text) return '';
+  return text
+    .trim()
+    .toLowerCase()
+    .replace(/[أإآآ]/g, 'ا')
+    .replace(/ة/g, 'ه')
+    .replace(/[ىي]/g, 'ي')
+    .replace(/[\u064B-\u065F\u0640]/g, '') // إزالة الحركات التشكيلية والتطويل
+    .replace(/\s+/g, ' ');
+}
+
+/**
+ * تعديل وتصحيح سند قبض سابق تم تسجيله بالخطأ:
+ * يعيد احتساب رصيد الفاتورة ومجموع المدفوعات المسددة ودفتر الأستاذ وسجل التدقيق
+ */
+export async function updatePayment(params: {
+  paymentId: string;
+  newAmount: number;
+  collectorName?: string;
+  notes?: string;
+  userId?: string;
+  userRole?: UserRole;
+}): Promise<Payment> {
+  const { paymentId, newAmount, collectorName, notes, userId, userRole } = params;
+  const payment = await db.payments.get(paymentId);
+  if (!payment) throw new Error('سند القبض غير موجود');
+
+  const cleanNewAmount = roundIQD(newAmount);
+  if (cleanNewAmount <= 0) throw new Error('يجب أن يكون المبلغ أكبر من الصفر');
+
+  const oldAmount = payment.amount;
+  const diff = cleanNewAmount - oldAmount;
+  const now = new Date().toISOString();
+
+  await db.transaction('rw', [db.payments, db.invoices, db.syncQueue, db.auditLogs, db.ledger], async () => {
+    // 1. تحديث السند
+    await db.payments.update(paymentId, {
+      amount: cleanNewAmount,
+      collectorName: collectorName || payment.collectorName,
+      notes: notes !== undefined ? notes : payment.notes,
+      updatedAt: now,
+    });
+
+    // 2. تحديث الفاتورة إن وجدت
+    if (payment.invoiceId) {
+      const invoice = await db.invoices.get(payment.invoiceId);
+      if (invoice) {
+        const newTotalPaid = Math.max(0, (invoice.totalPaid || 0) + diff);
+        const newStatus =
+          newTotalPaid >= invoice.totalDue
+            ? 'paid'
+            : newTotalPaid > 0
+            ? 'partial'
+            : 'unpaid';
+
+        await db.invoices.update(payment.invoiceId, {
+          totalPaid: newTotalPaid,
+          status: newStatus,
+          updatedAt: now,
+        });
+
+        await db.syncQueue.add({
+          id: `sync-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
+          action: 'update',
+          entity: 'invoices',
+          entityId: invoice.id,
+          payload: { ...invoice, totalPaid: newTotalPaid, status: newStatus, updatedAt: now },
+          createdAt: now,
+          attempts: 0,
+        });
+      }
+    }
+
+    // 3. تحديث قيود دفتر الأستاذ
+    const ledgerEntries = await db.ledger.where('referenceId').equals(paymentId).toArray();
+    for (const entry of ledgerEntries) {
+      if (entry.account === 'cash_box') {
+        await db.ledger.update(entry.id, { debit: cleanNewAmount });
+      } else if (entry.account === 'subscriber_receivable') {
+        await db.ledger.update(entry.id, { credit: cleanNewAmount });
+      }
+    }
+
+    // 4. توثيق عملية التعديل في سجل التدقيق والرقابة
+    await db.auditLogs.add({
+      id: `audit-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      tenantId: payment.tenantId,
+      userId: userId || 'local-user',
+      userName: collectorName || payment.collectorName || 'إدارة المولدة',
+      userRole: userRole || 'tenant_owner',
+      action: 'payment_updated',
+      entityType: 'payment',
+      entityId: payment.id,
+      details: {
+        oldAmount,
+        newAmount: cleanNewAmount,
+        diff,
+        receiptNumber: payment.receiptNumber,
+        subscriberId: payment.subscriberId,
+      },
+      createdAt: now,
+    });
+
+    // 5. إضافة طابور المزامنة
+    await db.syncQueue.add({
+      id: `sync-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
+      action: 'update',
+      entity: 'payments',
+      entityId: payment.id,
+      payload: { ...payment, amount: cleanNewAmount, collectorName, notes, updatedAt: now },
+      createdAt: now,
+      attempts: 0,
+    });
+  });
+
+  return {
+    ...payment,
+    amount: cleanNewAmount,
+    collectorName: collectorName || payment.collectorName,
+    notes: notes !== undefined ? notes : payment.notes,
+    updatedAt: now,
+  };
+}
+
+/**
+ * إلغاء / حذف سند قبض مسجل بالخطأ:
+ * يعيد الفاتورة لحالتها السابقة ويخصم المبلغ من المسددات
+ */
+export async function deletePayment(params: {
+  paymentId: string;
+  reason?: string;
+  userId?: string;
+  userRole?: UserRole;
+}): Promise<void> {
+  const { paymentId, reason, userId, userRole } = params;
+  const payment = await db.payments.get(paymentId);
+  if (!payment) throw new Error('سند القبض غير موجود');
+
+  const now = new Date().toISOString();
+
+  await db.transaction('rw', [db.payments, db.invoices, db.syncQueue, db.auditLogs, db.ledger], async () => {
+    // 1. إعادة رصيد الفاتورة
+    if (payment.invoiceId) {
+      const invoice = await db.invoices.get(payment.invoiceId);
+      if (invoice) {
+        const newTotalPaid = Math.max(0, (invoice.totalPaid || 0) - payment.amount);
+        const newStatus =
+          newTotalPaid >= invoice.totalDue
+            ? 'paid'
+            : newTotalPaid > 0
+            ? 'partial'
+            : 'unpaid';
+
+        await db.invoices.update(payment.invoiceId, {
+          totalPaid: newTotalPaid,
+          status: newStatus,
+          updatedAt: now,
+        });
+
+        await db.syncQueue.add({
+          id: `sync-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
+          action: 'update',
+          entity: 'invoices',
+          entityId: invoice.id,
+          payload: { ...invoice, totalPaid: newTotalPaid, status: newStatus, updatedAt: now },
+          createdAt: now,
+          attempts: 0,
+        });
+      }
+    }
+
+    // 2. حذف قيود الأستاذ المرتبطة
+    const ledgerEntries = await db.ledger.where('referenceId').equals(paymentId).toArray();
+    for (const entry of ledgerEntries) {
+      await db.ledger.delete(entry.id);
+    }
+
+    // 3. حذف السند
+    await db.payments.delete(paymentId);
+
+    // 4. توثيق الإلغاء في سجل التدقيق
+    await db.auditLogs.add({
+      id: `audit-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      tenantId: payment.tenantId,
+      userId: userId || 'local-user',
+      userName: payment.collectorName || 'إدارة المولدة',
+      userRole: userRole || 'tenant_owner',
+      action: 'payment_deleted',
+      entityType: 'payment',
+      entityId: payment.id,
+      details: {
+        amount: payment.amount,
+        receiptNumber: payment.receiptNumber,
+        subscriberId: payment.subscriberId,
+        reason: reason || 'إلغاء سند مسجل بالخطأ',
+      },
+      createdAt: now,
+    });
+
+    // 5. طابور المزامنة
+    await db.syncQueue.add({
+      id: `sync-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
+      action: 'delete',
+      entity: 'payments',
+      entityId: payment.id,
+      payload: { id: payment.id },
+      createdAt: now,
+      attempts: 0,
+    });
+  });
+}

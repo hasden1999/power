@@ -1,6 +1,6 @@
 import { useState, type FC } from 'react';
 import type { Subscriber, Payment, Invoice, TenantSettings } from '../types';
-import { formatIQD } from '../services/billingService';
+import { formatIQD, updatePayment, deletePayment } from '../services/billingService';
 import { bluetoothPrinter } from '../services/bluetoothPrinter';
 import {
   X,
@@ -13,7 +13,10 @@ import {
   AlertCircle,
   FileText,
   User,
-  Clock
+  Clock,
+  Pencil,
+  Trash2,
+  Save
 } from 'lucide-react';
 
 interface SubscriberPaymentLedgerModalProps {
@@ -32,6 +35,62 @@ export const SubscriberPaymentLedgerModal: FC<SubscriberPaymentLedgerModalProps>
   settings,
 }) => {
   const [printingPaymentId, setPrintingPaymentId] = useState<string | null>(null);
+
+  // حالة تعديل السند عند حدوث خطأ
+  const [editingPayment, setEditingPayment] = useState<Payment | null>(null);
+  const [editAmount, setEditAmount] = useState<string>('');
+  const [editCollector, setEditCollector] = useState<string>('');
+  const [editNotes, setEditNotes] = useState<string>('');
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+
+  const handleStartEdit = (p: Payment) => {
+    setEditingPayment(p);
+    setEditAmount(p.amount.toString());
+    setEditCollector(p.collectorName || '');
+    setEditNotes(p.notes || '');
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingPayment) return;
+    const amt = parseFloat(editAmount);
+    if (isNaN(amt) || amt <= 0) {
+      alert('يرجى كتابة مبلغ صحيح أكبر من الصفر');
+      return;
+    }
+
+    try {
+      setIsSavingEdit(true);
+      await updatePayment({
+        paymentId: editingPayment.id,
+        newAmount: amt,
+        collectorName: editCollector,
+        notes: editNotes,
+      });
+      setEditingPayment(null);
+      alert('تم تعديل السند وإعادة احتساب الفاتورة والرصيد بنجاح! ⚡');
+    } catch (err: any) {
+      console.error('خطأ في تعديل السند:', err);
+      alert(err.message || 'حدث خطأ أثناء حفظ تعديل السند');
+    } finally {
+      setIsSavingEdit(false);
+    }
+  };
+
+  const handleDeletePayment = async (p: Payment) => {
+    const confirmMsg = `هل أنت متأكد من إلغاء وحذف السند رقم (${p.receiptNumber || p.id}) بمبلغ ${formatIQD(p.amount)}؟\nسيتم استرجاع رصيد الفاتورة وإضافة المبلغ إلى المتبقي بذمة المشترك فوراً.`;
+    if (!confirm(confirmMsg)) return;
+
+    try {
+      await deletePayment({
+        paymentId: p.id,
+        reason: 'إلغاء سند مسجل بالخطأ من كشف الحساب',
+      });
+      alert('تم إلغاء السند وتحديث الرصيد فوراً.');
+    } catch (err: any) {
+      console.error('خطأ في حذف السند:', err);
+      alert(err.message || 'حدث خطأ أثناء إلغاء السند');
+    }
+  };
 
   // فرز الدفعات من الأحدث إلى الأقدم زمنياً
   const sortedPayments = [...payments].sort((a, b) => {
@@ -327,28 +386,53 @@ export const SubscriberPaymentLedgerModal: FC<SubscriberPaymentLedgerModalProps>
                       )}
                     </div>
 
-                    {/* إجراءات سريعة على السند: إعادة الطباعة الحرارية والمشاركة عبر واتساب */}
-                    <div className="flex items-center justify-end gap-2 pt-1">
-                      <button
-                        type="button"
-                        onClick={() => handleShareReceiptWhatsApp(p)}
-                        className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-emerald-400 border border-emerald-500/30 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer active:scale-95"
-                        title="مشاركة تفاصيل هذا الوصل عبر واتساب"
-                      >
-                        <MessageSquare className="w-3.5 h-3.5" />
-                        <span>سند واتساب</span>
-                      </button>
+                    {/* إجراءات سريعة على السند: تعديل السند، إعادة الطباعة الحرارية والمشاركة عبر واتساب */}
+                    <div className="flex items-center justify-between gap-2 pt-1 flex-wrap">
+                      <div className="flex items-center gap-1.5">
+                        {/* زر تعديل السند عند حدوث خطأ */}
+                        <button
+                          type="button"
+                          onClick={() => handleStartEdit(p)}
+                          className="flex items-center gap-1 bg-slate-900 hover:bg-slate-800 text-amber-300 border border-slate-700 px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer active:scale-95"
+                          title="تعديل مبلغ أو تفاصيل السند إذا حدث خطأ أثناء القبض"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                          <span>تعديل</span>
+                        </button>
 
-                      <button
-                        type="button"
-                        onClick={() => handlePrintSingleReceipt(p)}
-                        disabled={printingPaymentId === p.id}
-                        className="flex items-center gap-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 px-3 py-1.5 rounded-xl text-xs font-black shadow-md shadow-amber-500/20 transition-all cursor-pointer active:scale-95 disabled:opacity-50"
-                        title="إعادة طباعة الوصل الحراري"
-                      >
-                        <Printer className="w-3.5 h-3.5" />
-                        <span>{printingPaymentId === p.id ? 'جاري الطباعة...' : 'طباعة الوصل'}</span>
-                      </button>
+                        {/* زر حذف أو إلغاء السند المسجل بالخطأ */}
+                        <button
+                          type="button"
+                          onClick={() => handleDeletePayment(p)}
+                          className="flex items-center gap-1 bg-slate-900 hover:bg-rose-950/60 text-rose-400 border border-slate-800 hover:border-rose-500/40 p-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer active:scale-95"
+                          title="إلغاء هذا السند وإعادة المبلغ لذمة المشترك"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleShareReceiptWhatsApp(p)}
+                          className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-emerald-400 border border-emerald-500/30 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer active:scale-95"
+                          title="مشاركة تفاصيل هذا الوصل عبر واتساب"
+                        >
+                          <MessageSquare className="w-3.5 h-3.5" />
+                          <span>سند واتساب</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handlePrintSingleReceipt(p)}
+                          disabled={printingPaymentId === p.id}
+                          className="flex items-center gap-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 px-3 py-1.5 rounded-xl text-xs font-black shadow-md shadow-amber-500/20 transition-all cursor-pointer active:scale-95 disabled:opacity-50"
+                          title="إعادة طباعة الوصل الحراري"
+                        >
+                          <Printer className="w-3.5 h-3.5" />
+                          <span>{printingPaymentId === p.id ? 'جاري الطباعة...' : 'طباعة الوصل'}</span>
+                        </button>
+                      </div>
                     </div>
 
                   </div>
@@ -376,6 +460,90 @@ export const SubscriberPaymentLedgerModal: FC<SubscriberPaymentLedgerModalProps>
         </div>
 
       </div>
+
+      {/* نافذة تعديل السند وتصحيح الخطأ */}
+      {editingPayment && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-black/80 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-slate-900 border border-amber-500/50 rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl space-y-4 p-4 text-right">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+              <div className="flex items-center gap-2 text-amber-400">
+                <Pencil className="w-4 h-4" />
+                <h4 className="font-bold text-sm text-white">
+                  تعديل السند #{editingPayment.receiptNumber || editingPayment.id}
+                </h4>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingPayment(null)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="block text-slate-300 font-bold mb-1">
+                  المبلغ الجديد (د.ع) <span className="text-rose-400">*</span>
+                </label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    value={editAmount}
+                    onChange={(e) => setEditAmount(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 focus:border-amber-500 rounded-xl pr-3 pl-12 py-2.5 text-base font-black text-emerald-400 focus:outline-none transition"
+                    autoFocus
+                  />
+                  <span className="absolute left-3 top-3 text-[11px] text-slate-500 font-black">د.ع</span>
+                </div>
+                <span className="text-[10px] text-slate-400 mt-1 block">
+                  المبلغ السابق المسجل: {formatIQD(editingPayment.amount)}
+                </span>
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-bold mb-1">اسم الجابي / المستلم</label>
+                <input
+                  type="text"
+                  value={editCollector}
+                  onChange={(e) => setEditCollector(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 rounded-xl px-3 py-2 text-xs text-white focus:outline-none transition"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-bold mb-1">ملاحظة التعديل (اختياري)</label>
+                <input
+                  type="text"
+                  placeholder="سبب التعديل: تصحيح خطأ في المبلغ..."
+                  value={editNotes}
+                  onChange={(e) => setEditNotes(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 rounded-xl px-3 py-2 text-xs text-white focus:outline-none transition"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setEditingPayment(null)}
+                className="px-3.5 py-2 text-xs text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition"
+              >
+                إلغاء
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveEdit}
+                disabled={isSavingEdit}
+                className="flex items-center gap-1.5 bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 px-4 py-2 rounded-xl text-xs font-black shadow-md shadow-amber-500/20 transition cursor-pointer disabled:opacity-50"
+              >
+                <Save className="w-3.5 h-3.5" />
+                <span>{isSavingEdit ? 'جاري الحفظ...' : 'حفظ التعديل والاحتساب'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

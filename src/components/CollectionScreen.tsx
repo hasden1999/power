@@ -8,7 +8,8 @@ import {
   calculateUnitPrice,
   syncSubscriberInvoiceForCurrentCycle,
   syncAllMissingInvoices,
-  generateInvoicesForCycle
+  generateInvoicesForCycle,
+  normalizeArabic,
 } from '../services/billingService';
 import { logAuditAction } from '../services/auditService';
 import { ThermalReceiptModal } from './ThermalReceiptModal';
@@ -48,6 +49,7 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
   currentUser,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
+  const [isSuggestionsOpen, setIsSuggestionsOpen] = useState(false);
   const [selectedStreet, setSelectedStreet] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'unpaid' | 'partial' | 'paid' | 'debt'>('all');
   const [selectedLedgerSub, setSelectedLedgerSub] = useState<Subscriber | null>(null);
@@ -63,6 +65,7 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
   // نوافذ الدفع والتأكيد
   const [payingSub, setPayingSub] = useState<{ sub: Subscriber; invoice?: Invoice } | null>(null);
   const [customAmount, setCustomAmount] = useState<string>('');
+  const [isOverpaymentConfirmed, setIsOverpaymentConfirmed] = useState(false);
   const [collectorName, setCollectorName] = useState<string>(
     currentUser?.fullName || currentUser?.username || settings?.ownerName || 'الجابي الميداني'
   );
@@ -380,19 +383,50 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
     };
   }, [payments, subscribers, invoiceMap, latestCycle]);
 
+  // اقتراحات واحتمالات البحث اللحظية فور كتابة أي حرف مع المعايرة العربية
+  const searchSuggestions = useMemo(() => {
+    const term = searchTerm.trim();
+    if (!term) return [];
+    const normTerm = normalizeArabic(term);
+    const cleanTerm = term.replace(/[^0-9]/g, '');
+
+    return subscribers
+      .filter((sub) => {
+        const normName = normalizeArabic(sub.fullName);
+        const normStreet = normalizeArabic(sub.street);
+        const cleanPhone = (sub.phone || '').replace(/[^0-9]/g, '');
+
+        return (
+          normName.includes(normTerm) ||
+          (cleanTerm ? cleanPhone.includes(cleanTerm) : false) ||
+          sub.breakerNumber.toLowerCase().includes(term.toLowerCase()) ||
+          normStreet.includes(normTerm)
+        );
+      })
+      .slice(0, 8);
+  }, [subscribers, searchTerm]);
+
   // تصفية المشتركين بناءً على البحث والشارع وحالة الدفع وجدار الديون
   const filteredSubscribers = useMemo(() => {
     return subscribers.filter((sub) => {
       const balance = getSubscriberBalance(sub);
 
-      // مطابقة البحث
-      const term = searchTerm.trim().toLowerCase();
-      const matchesSearch =
-        !term ||
-        sub.fullName.toLowerCase().includes(term) ||
-        sub.phone.includes(term) ||
-        sub.breakerNumber.toLowerCase().includes(term) ||
-        sub.street.toLowerCase().includes(term);
+      // مطابقة البحث الذكي بمعايرة الحروف والهمزات العربية
+      const term = searchTerm.trim();
+      let matchesSearch = true;
+      if (term) {
+        const normTerm = normalizeArabic(term);
+        const normName = normalizeArabic(sub.fullName);
+        const normStreet = normalizeArabic(sub.street);
+        const cleanPhone = (sub.phone || '').replace(/[^0-9]/g, '');
+        const cleanTerm = term.replace(/[^0-9]/g, '');
+
+        matchesSearch =
+          normName.includes(normTerm) ||
+          (cleanTerm ? cleanPhone.includes(cleanTerm) : false) ||
+          sub.breakerNumber.toLowerCase().includes(term.toLowerCase()) ||
+          normStreet.includes(normTerm);
+      }
 
       // مطابقة الشارع
       const matchesStreet = selectedStreet === 'all' || sub.street === selectedStreet;
@@ -428,15 +462,29 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
     const due = balance.remaining;
     setPayingSub({ sub, invoice: inv || balance.invoice });
     setCustomAmount(due > 0 ? due.toString() : '');
+    setIsOverpaymentConfirmed(false);
     setPaymentNote('');
   };
 
-  // تأكيد تسجيل الدفعة
+  // تأكيد تسجيل الدفعة مع التحقق من عدم تجاوز الذمة إلا بتأكيد صريح
   const handleConfirmPayment = async () => {
     if (!payingSub) return;
     const amountNum = parseFloat(customAmount);
     if (isNaN(amountNum) || amountNum <= 0) {
       alert('يرجى إدخال مبلغ صحيح بالدينار العراقي');
+      return;
+    }
+
+    const balance = getSubscriberBalance(payingSub.sub);
+    const targetDue = balance.remaining;
+    const isOverpaying = targetDue > 0 && amountNum > targetDue;
+    const overpaymentDiff = isOverpaying ? amountNum - targetDue : 0;
+
+    // اشتراط تأكيد تسجيل الزيادة في حال كان المبلغ أكبر من الذمة المطلوبة
+    if (isOverpaying && !isOverpaymentConfirmed) {
+      alert(
+        `⚠️ تنبيه هام:\nالمبلغ المدخل (${formatIQD(amountNum)}) أكبر من الذمة المطلوبة (${formatIQD(targetDue)}) بفارق زائد قدره (+${formatIQD(overpaymentDiff)}).\n\nالأصل تسديد الذمة فقط. إذا كان المشترك يسدد مقدماً، يرجى الضغط على زر (زر: تأكيد تسجيل الزيادة) البرتقالي لتأكيد العملية.`
+      );
       return;
     }
 
@@ -455,13 +503,17 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
         }
       }
 
+      const cleanNoteWithSurplus = isOverpaying
+        ? (paymentNote ? `${paymentNote} (زيادة فائضة: +${formatIQD(overpaymentDiff)})` : `(تسديد زيادة مقدماً: +${formatIQD(overpaymentDiff)})`)
+        : paymentNote || undefined;
+
       const payment = await recordPayment({
         tenantId: currentTenantId,
         subscriberId: payingSub.sub.id,
         invoiceId,
         amount: amountNum,
         collectorName: collectorName || 'صاحب المولدة',
-        notes: paymentNote || undefined,
+        notes: cleanNoteWithSurplus,
         userId: currentUser?.id,
         userRole: currentUser?.role,
       });
@@ -586,20 +638,28 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
   return (
     <div className="space-y-2.5 pb-12">
       
-      {/* 1. حقل البحث عن المشترك في أعلى الصفحة تماماً */}
-      <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-2.5 sm:p-3 shadow-lg">
+      {/* 1. حقل البحث عن المشترك مع الاحتمالات والاقتراحات اللحظية فور كتابة أي حرف */}
+      <div className="relative bg-slate-900/90 border border-slate-800 rounded-2xl p-2.5 sm:p-3 shadow-lg z-30">
         <div className="relative flex items-center">
           <Search className="absolute right-3.5 w-5 h-5 text-amber-400 pointer-events-none" />
           <input
             type="text"
-            placeholder="🔍 ابحث باسم المشترك، رقم القاطع (الفيز)، الهاتف، أو الزقاق..."
+            placeholder="🔍 اكتب أي حرف للبحث بالاسم، رقم القاطع، الهاتف، أو الزقاق..."
             value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+            onFocus={() => setIsSuggestionsOpen(true)}
+            onChange={(e) => {
+              setSearchTerm(e.target.value);
+              setIsSuggestionsOpen(true);
+            }}
             className="w-full bg-slate-950 border border-slate-700 focus:border-amber-500 rounded-xl pr-11 pl-10 py-2.5 sm:py-3 text-sm text-white placeholder-slate-400 focus:outline-none transition-all shadow-inner font-bold"
           />
           {searchTerm && (
             <button
-              onClick={() => setSearchTerm('')}
+              type="button"
+              onClick={() => {
+                setSearchTerm('');
+                setIsSuggestionsOpen(false);
+              }}
               className="absolute left-3 p-1 text-slate-400 hover:text-white bg-slate-800 rounded-lg transition-colors cursor-pointer"
               title="مسح البحث"
             >
@@ -607,6 +667,107 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
             </button>
           )}
         </div>
+
+        {/* قائمة الاحتمالات والاقتراحات اللحظية المباشرة فور كتابة أي حرف */}
+        {isSuggestionsOpen && searchTerm.trim().length > 0 && (
+          <div className="absolute left-0 right-0 top-full mt-1.5 bg-slate-950 border-2 border-amber-500/60 rounded-2xl shadow-2xl overflow-hidden z-50 max-h-80 overflow-y-auto divide-y divide-slate-800 animate-in fade-in slide-in-from-top-2">
+            <div className="px-3 py-2 bg-slate-900/90 flex items-center justify-between text-xs text-slate-400">
+              <span className="font-bold flex items-center gap-1.5 text-amber-300">
+                <Search className="w-3.5 h-3.5" />
+                <span>الاحتمالات المطابقة ({searchSuggestions.length}):</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsSuggestionsOpen(false)}
+                className="text-slate-400 hover:text-white text-[11px] font-bold cursor-pointer"
+              >
+                إغلاق [×]
+              </button>
+            </div>
+
+            {searchSuggestions.length === 0 ? (
+              <div className="p-4 text-center text-xs text-slate-400">
+                لا توجد نتائج مطابقة لـ: <strong className="text-white font-bold">"{searchTerm}"</strong>
+              </div>
+            ) : (
+              searchSuggestions.map((sub) => {
+                const bal = getSubscriberBalance(sub);
+                return (
+                  <div
+                    key={sub.id}
+                    onClick={() => {
+                      setSearchTerm(sub.fullName);
+                      setIsSuggestionsOpen(false);
+                    }}
+                    className="p-2.5 sm:p-3 hover:bg-slate-900 transition flex items-center justify-between gap-2 cursor-pointer group"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-black text-sm text-white group-hover:text-amber-400 transition">
+                          {sub.fullName}
+                        </span>
+                        <span className="text-[10px] bg-slate-800 text-slate-300 px-2 py-0.5 rounded-md font-mono">
+                          قاطع: {sub.breakerNumber} ({sub.amperes}A)
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 text-[11px] text-slate-400 mt-0.5 truncate">
+                        <span>{sub.street || 'بدون شارع'}</span>
+                        {sub.phone && (
+                          <>
+                            <span>•</span>
+                            <span className="font-mono">{sub.phone}</span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      {bal.remaining > 0 ? (
+                        <div className="text-left">
+                          <span className="text-[10px] text-rose-400 block">مطلوب بذمته</span>
+                          <span className="text-xs sm:text-sm font-black text-rose-400">
+                            {formatIQD(bal.remaining)}
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="text-[11px] font-black text-emerald-400 bg-emerald-500/15 border border-emerald-500/30 px-2.5 py-1 rounded-lg">
+                          خالص 🟢
+                        </span>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setIsSuggestionsOpen(false);
+                          setSelectedLedgerSub(sub);
+                        }}
+                        className="p-2 bg-slate-900 hover:bg-slate-800 text-amber-400 border border-slate-700/80 rounded-xl text-xs transition active:scale-95 cursor-pointer"
+                        title="عرض سجل الوصولات السابقة وتعديلها"
+                      >
+                        <History className="w-3.5 h-3.5" />
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setIsSuggestionsOpen(false);
+                          openPaymentModal(sub);
+                        }}
+                        className="flex items-center gap-1 bg-amber-500 hover:bg-amber-400 text-slate-950 px-2.5 py-1.5 rounded-xl text-xs font-black transition active:scale-95 shadow-md shadow-amber-500/20 cursor-pointer"
+                        title="تسجيل قبض مباشر لهذا المشترك"
+                      >
+                        <Zap className="w-3.5 h-3.5 fill-slate-950" />
+                        <span>قبض ⚡</span>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        )}
       </div>
 
       {/* 2. شاشة القيادة الذكية: تسعيرة الشهر (أقل بروزاً) + المربعات الأربعة (2×2 تقضي على السكرول) */}
@@ -1106,118 +1267,219 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
       {/* صفيحة تسجيل الدفعة السريعة (Quick Payment Bottom Sheet) */}
       <BottomSheet
         isOpen={Boolean(payingSub)}
-        onClose={() => setPayingSub(null)}
+        onClose={() => {
+          setPayingSub(null);
+          setIsOverpaymentConfirmed(false);
+        }}
         title={payingSub ? `تسجيل سند: ${payingSub.sub.fullName}` : 'تسجيل سند قبض'}
         subtitle={payingSub ? `القاطع: ${payingSub.sub.breakerNumber} (${payingSub.sub.amperes} أمبير) - ${payingSub.sub.street}` : ''}
         icon={<CreditCard className="w-5 h-5 text-amber-400" />}
         footer={
-          <div className="flex gap-2">
-            <button
-              onClick={handleConfirmPayment}
-              disabled={isSubmitting}
-              className="flex-1 flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-black py-3 px-4 rounded-xl shadow-lg shadow-emerald-600/20 text-sm transition-all cursor-pointer"
-            >
-              <Send className="w-4 h-4" />
-              <span>{isSubmitting ? 'جاري الحفظ...' : 'تأكيد وقبض المبلغ'}</span>
-            </button>
-            <button
-              onClick={() => setPayingSub(null)}
-              className="px-4 py-3 text-xs font-bold text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition-colors cursor-pointer"
-            >
-              إلغاء
-            </button>
-          </div>
+          (() => {
+            const payingBalance = payingSub ? getSubscriberBalance(payingSub.sub) : null;
+            const payingDue = payingBalance ? payingBalance.remaining : 0;
+            const enteredAmt = parseFloat(customAmount) || 0;
+            const isOverpaying = payingDue > 0 && enteredAmt > payingDue;
+            const requiresConfirmation = isOverpaying && !isOverpaymentConfirmed;
+
+            return (
+              <div className="flex gap-2">
+                <button
+                  onClick={handleConfirmPayment}
+                  disabled={isSubmitting}
+                  className={`flex-1 flex items-center justify-center gap-2 font-black py-3 px-4 rounded-xl shadow-lg text-sm transition-all cursor-pointer ${
+                    requiresConfirmation
+                      ? 'bg-amber-600 hover:bg-amber-500 text-white shadow-amber-600/30 ring-2 ring-amber-400/50'
+                      : 'bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white shadow-emerald-600/20'
+                  }`}
+                >
+                  <Send className="w-4 h-4" />
+                  <span>
+                    {isSubmitting
+                      ? 'جاري الحفظ...'
+                      : requiresConfirmation
+                      ? `تأكيد وقبض الزيادة (${formatIQD(enteredAmt)})`
+                      : 'تأكيد وقبض المبلغ'}
+                  </span>
+                </button>
+                <button
+                  onClick={() => {
+                    setPayingSub(null);
+                    setIsOverpaymentConfirmed(false);
+                  }}
+                  className="px-4 py-3 text-xs font-bold text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition-colors cursor-pointer"
+                >
+                  إلغاء
+                </button>
+              </div>
+            );
+          })()
         }
       >
-        {payingSub && (
-          <div className="space-y-3.5">
-            {/* إجمالي المستحق للتذكير */}
-            <div className="bg-slate-950 p-3 rounded-2xl border border-slate-800 flex justify-between items-center">
-              <span className="text-xs text-slate-400">إجمالي المبلغ المطلوب بذمته:</span>
-              <span className="text-base font-black text-amber-400">
-                {payingSub.invoice
-                  ? formatIQD(payingSub.invoice.totalDue - payingSub.invoice.totalPaid)
-                  : formatIQD(payingSub.sub.openingBalance)}
-              </span>
-            </div>
+        {payingSub && (() => {
+          const payingBalance = getSubscriberBalance(payingSub.sub);
+          const payingDue = payingBalance.remaining;
+          const enteredAmt = parseFloat(customAmount) || 0;
+          const isOverpaying = payingDue > 0 && enteredAmt > payingDue;
+          const overpaymentDiff = isOverpaying ? enteredAmt - payingDue : 0;
 
-            {/* أزرار النقد العراقي السريع (Quick Iraqi Cash Chips) */}
-            <div>
-              <label className="block text-xs font-bold text-slate-300 mb-1.5">
-                مبالغ سريعة بنقرة واحدة:
-              </label>
-              <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5">
-                {[5000, 10000, 15000, 20000, 25000, 50000].map((quickVal) => (
-                  <button
-                    key={quickVal}
-                    type="button"
-                    onClick={() => setCustomAmount(quickVal.toString())}
-                    className="bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-amber-500/40 text-amber-300 py-2 px-1 rounded-xl text-xs font-bold transition-all active:scale-95 cursor-pointer text-center"
-                  >
-                    {quickVal >= 1000 ? `${quickVal / 1000} ألف` : quickVal}
-                  </button>
-                ))}
+          return (
+            <div className="space-y-3.5">
+              {/* إجمالي المستحق للتذكير */}
+              <div className="bg-slate-950 p-3.5 rounded-2xl border border-slate-800 flex justify-between items-center">
+                <div>
+                  <span className="text-xs text-slate-400 block font-medium">إجمالي المبلغ المطلوب بذمته:</span>
+                  <span className="text-[11px] text-amber-500/80 font-bold">المطلوب تسديد هذا المبلغ فقط</span>
+                </div>
+                <div className="text-left">
+                  <span className="text-lg font-black text-amber-400 block font-mono">
+                    {formatIQD(payingDue)}
+                  </span>
+                  {payingBalance.remainingPreviousDebt > 0 && (
+                    <span className="text-[10px] text-rose-400 font-bold">
+                      منها ديون سابقة: {formatIQD(payingBalance.remainingPreviousDebt)}
+                    </span>
+                  )}
+                </div>
               </div>
-            </div>
 
-            {/* حقل إدخال المبلغ */}
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <label className="text-xs font-bold text-slate-300">
-                  المبلغ المقبوض (د.ع) <span className="text-rose-400">*</span>
+              {/* تنبيه واضح جداً عند إدخال مبلغ أكبر من الذمة مع زر تأكيد صريح لتسجيل هذه العملية */}
+              {isOverpaying && (
+                <div className="bg-amber-950/40 border-2 border-amber-500/70 p-3.5 rounded-2xl animate-in fade-in slide-in-from-top-2">
+                  <div className="flex items-start gap-2.5">
+                    <AlertCircle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+                    <div className="flex-1 space-y-2.5">
+                      <div className="text-xs text-amber-200 leading-relaxed font-bold">
+                        <span className="text-amber-300 font-black text-sm block mb-1">
+                          ⚠️ تنبيه: المبلغ المدخل أكبر من الذمة المطلوبة!
+                        </span>
+                        <div className="text-[11px] text-slate-300 space-y-0.5">
+                          <div>المطلوب بذمته فقط: <strong className="text-amber-300 font-mono">{formatIQD(payingDue)}</strong></div>
+                          <div>المبلغ المدخل: <strong className="text-white font-mono">{formatIQD(enteredAmt)}</strong></div>
+                          <div>الزيادة الفائضة: <strong className="text-emerald-400 font-mono">+{formatIQD(overpaymentDiff)}</strong></div>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2 pt-1 border-t border-amber-500/20">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCustomAmount(payingDue.toString());
+                            setIsOverpaymentConfirmed(false);
+                          }}
+                          className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 text-xs font-bold rounded-xl cursor-pointer transition-all active:scale-95"
+                        >
+                          🎯 ضبط على الذمة فقط ({formatIQD(payingDue)})
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setIsOverpaymentConfirmed(true)}
+                          className={`px-3 py-1.5 text-xs font-black rounded-xl cursor-pointer transition-all active:scale-95 ${
+                            isOverpaymentConfirmed
+                              ? 'bg-emerald-600 text-white border border-emerald-400 shadow-md shadow-emerald-600/30'
+                              : 'bg-amber-500 hover:bg-amber-400 text-slate-950 font-black shadow-md shadow-amber-500/25 ring-2 ring-amber-300'
+                          }`}
+                        >
+                          {isOverpaymentConfirmed ? '✓ تم تأكيد تسجيل الزيادة بنجاح' : '⚡ زر: تأكيد تسجيل الزيادة لهذه العملية'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* أزرار النقد العراقي السريع (Quick Iraqi Cash Chips) */}
+              <div>
+                <label className="block text-xs font-bold text-slate-300 mb-1.5">
+                  مبالغ سريعة بنقرة واحدة:
                 </label>
-                {payingSub.invoice && (
-                  <button
-                    type="button"
-                    onClick={() => setCustomAmount((payingSub.invoice!.totalDue - payingSub.invoice!.totalPaid).toString())}
-                    className="text-[11px] text-amber-400 hover:underline font-bold cursor-pointer"
-                  >
-                    تسديد كامل المتبقي
-                  </button>
-                )}
+                <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5">
+                  {[5000, 10000, 15000, 20000, 25000, 50000].map((quickVal) => (
+                    <button
+                      key={quickVal}
+                      type="button"
+                      onClick={() => {
+                        setCustomAmount(quickVal.toString());
+                        setIsOverpaymentConfirmed(false);
+                      }}
+                      className="bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-amber-500/40 text-amber-300 py-2 px-1 rounded-xl text-xs font-bold transition-all active:scale-95 cursor-pointer text-center"
+                    >
+                      {quickVal >= 1000 ? `${quickVal / 1000} ألف` : quickVal}
+                    </button>
+                  ))}
+                </div>
               </div>
-              <div className="relative">
+
+              {/* حقل إدخال المبلغ */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-bold text-slate-300">
+                    المبلغ المقبوض (د.ع) <span className="text-rose-400">*</span>
+                  </label>
+                  {payingDue > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCustomAmount(payingDue.toString());
+                        setIsOverpaymentConfirmed(false);
+                      }}
+                      className="text-[11px] text-amber-400 hover:underline font-bold cursor-pointer"
+                    >
+                      تسديد كامل المتبقي ({formatIQD(payingDue)})
+                    </button>
+                  )}
+                </div>
+                <div className="relative">
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    autoFocus
+                    placeholder="مثال: 50000"
+                    value={customAmount}
+                    onChange={(e) => {
+                      setCustomAmount(e.target.value.replace(/[^0-9]/g, ''));
+                      setIsOverpaymentConfirmed(false);
+                    }}
+                    className={`w-full bg-slate-950 border rounded-xl pr-3 pl-12 py-3 text-lg font-black focus:outline-none transition-all ${
+                      isOverpaying
+                        ? 'border-amber-500 text-amber-300 ring-2 ring-amber-500/30'
+                        : 'border-slate-700 focus:border-amber-500 text-emerald-400'
+                    }`}
+                  />
+                  <span className="absolute left-3 top-3.5 text-xs text-slate-500 font-black">د.ع</span>
+                </div>
+              </div>
+
+              {/* اسم المحصل */}
+              <div>
+                <label className="block text-xs font-bold text-slate-300 mb-1">
+                  اسم المستلم / الجابي
+                </label>
                 <input
                   type="text"
-                  inputMode="numeric"
-                  autoFocus
-                  placeholder="مثال: 50000"
-                  value={customAmount}
-                  onChange={(e) => setCustomAmount(e.target.value.replace(/[^0-9]/g, ''))}
-                  className="w-full bg-slate-950 border border-slate-700 focus:border-amber-500 rounded-xl pr-3 pl-12 py-3 text-lg font-black text-emerald-400 focus:outline-none transition-all"
+                  value={collectorName}
+                  onChange={(e) => setCollectorName(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none transition-all"
                 />
-                <span className="absolute left-3 top-3.5 text-xs text-slate-500 font-black">د.ع</span>
+              </div>
+
+              {/* ملاحظات */}
+              <div>
+                <label className="block text-xs font-bold text-slate-300 mb-1">
+                  ملاحظة على السند (اختياري)
+                </label>
+                <input
+                  type="text"
+                  placeholder="مثال: واصل من حسابه، سدد عند البيت..."
+                  value={paymentNote}
+                  onChange={(e) => setPaymentNote(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none transition-all"
+                />
               </div>
             </div>
-
-            {/* اسم المحصل */}
-            <div>
-              <label className="block text-xs font-bold text-slate-300 mb-1">
-                اسم المستلم / الجابي
-              </label>
-              <input
-                type="text"
-                value={collectorName}
-                onChange={(e) => setCollectorName(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none transition-all"
-              />
-            </div>
-
-            {/* ملاحظات */}
-            <div>
-              <label className="block text-xs font-bold text-slate-300 mb-1">
-                ملاحظة على السند (اختياري)
-              </label>
-              <input
-                type="text"
-                placeholder="مثال: واصل من حسابه، سدد عند البيت..."
-                value={paymentNote}
-                onChange={(e) => setPaymentNote(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none transition-all"
-              />
-            </div>
-          </div>
-        )}
+          );
+        })()}
       </BottomSheet>
 
       {/* نافذة الوصل الحراري وسند الواتساب بعد التسديد */}

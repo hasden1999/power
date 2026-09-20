@@ -131,6 +131,8 @@ export type AuditAction =
   | 'update' 
   | 'delete' 
   | 'payment_recorded' 
+  | 'payment_updated'
+  | 'payment_deleted'
   | 'price_changed' 
   | 'debt_adjusted' 
   | 'login' 
