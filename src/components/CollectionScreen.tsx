@@ -12,11 +12,10 @@ import {
   normalizeArabic,
 } from '../services/billingService';
 import { logAuditAction } from '../services/auditService';
-import { ThermalReceiptModal } from './ThermalReceiptModal';
+import { PaymentSuccessModal } from './PaymentSuccessModal';
 import { BottomSheet } from './BottomSheet';
 import { ExecutiveCockpit, type CockpitStats } from './ExecutiveCockpit';
 import { SubscriberPaymentLedgerModal } from './SubscriberPaymentLedgerModal';
-import { bluetoothPrinter } from '../services/bluetoothPrinter';
 import type { Subscriber, Invoice, Payment, TenantSettings, BillingCycle, UserAccount } from '../types';
 import {
   Search,
@@ -568,14 +567,7 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
 
       onRefreshSync();
 
-      // طباعة حرارية تلقائية صامتة إذا كانت الطابعة متصلة
-      if (bluetoothPrinter.isSupported()) {
-        try {
-          bluetoothPrinter.printReceipt(sub, payment, 0, settings).catch(() => {});
-        } catch (_) {}
-      }
-
-      // فتح نافذة الوصل للمعاينة أو المشاركة
+      // فتح نافذة تأكيد القبض وتفاصيل السند مع جعل الطباعة خياراً اختيارياً
       setLastPaymentReceipt({
         subscriber: sub,
         payment,
@@ -1451,9 +1443,9 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
         })()}
       </BottomSheet>
 
-      {/* نافذة الوصل الحراري وسند الواتساب بعد التسديد */}
+      {/* نافذة تأكيد عملية القبض وتفاصيل السند مع جعل الطباعة خياراً اختيارياً */}
       {lastPaymentReceipt && (
-        <ThermalReceiptModal
+        <PaymentSuccessModal
           isOpen={true}
           onClose={() => setLastPaymentReceipt(null)}
           subscriber={lastPaymentReceipt.subscriber}
