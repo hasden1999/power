@@ -13,7 +13,7 @@ import {
 } from '../services/billingService';
 import { logAuditAction } from '../services/auditService';
 import { SubscriberPaymentLedgerModal } from './SubscriberPaymentLedgerModal';
-import type { Subscriber, SubscriptionType, Invoice, UserAccount } from '../types';
+import type { Subscriber, SubscriptionType, Invoice, UserAccount, BillingCycle } from '../types';
 import {
   Plus,
   Search,
@@ -109,7 +109,19 @@ export const SubscribersScreen: FC<SubscribersScreenProps> = ({ tenantId, curren
 
   // احتساب المعاينة المباشرة لتكلفة الاشتراك للشهر الحالي أثناء تعبئة النافذة
   const currentCyclePreview = useMemo(() => {
-    if (!latestCycle) return null;
+    const fallbackCycle: BillingCycle = {
+      id: 'fallback-cycle',
+      tenantId,
+      month: new Date().getMonth() + 1,
+      year: new Date().getFullYear(),
+      pricePerAmpereNormal: settings?.defaultPriceNormal || 12000,
+      pricePerAmpereGold: settings?.defaultPriceGold || 20000,
+      pricePerAmpereNight: 8000,
+      issueDate: new Date().toISOString(),
+      isClosed: false,
+      createdAt: new Date().toISOString(),
+    };
+    const cycle = latestCycle || fallbackCycle;
     const ampNum = parseFloat(amperes) || 0;
     const fixedNum = parseFloat(fixedPrice) || 0;
     const openBalNum = parseFloat(openingBalance) || 0;
@@ -119,17 +131,17 @@ export const SubscribersScreen: FC<SubscribersScreenProps> = ({ tenantId, curren
       fixedPrice: fixedNum,
       amperes: ampNum,
     };
-    const unitPrice = calculateUnitPrice(mockSub as Subscriber, latestCycle);
+    const unitPrice = calculateUnitPrice(mockSub as Subscriber, cycle);
     const monthlyCost = subscriptionType === 'fixed' ? fixedNum : roundIQD(ampNum * unitPrice);
     const totalRequired = monthlyCost + openBalNum;
 
     return {
-      cycleName: `شهر ${latestCycle.month} / ${latestCycle.year}`,
+      cycleName: `شهر ${cycle.month} / ${cycle.year}`,
       unitPrice,
       monthlyCost,
       totalRequired,
     };
-  }, [latestCycle, amperes, fixedPrice, openingBalance, subscriptionType]);
+  }, [latestCycle, settings, tenantId, amperes, fixedPrice, openingBalance, subscriptionType]);
 
 
   // قائمة الأزقة والشوارع الفريدة

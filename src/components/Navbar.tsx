@@ -1,10 +1,8 @@
 import type { FC } from 'react';
-import { Zap, Wifi, WifiOff, RefreshCw, Users, DollarSign, Calendar, Settings, LogOut, ArrowRight, Download, TrendingDown, Sun, SunMedium, Sliders } from 'lucide-react';
-
+import { Zap, Wifi, WifiOff, RefreshCw, Users, DollarSign, Calendar, Settings, LogOut, ArrowRight, TrendingDown, Sun, SunMedium } from 'lucide-react';
 
 import type { SyncStatusInfo } from '../services/syncService';
 import type { UserAccount } from '../types';
-import { APP_VERSION, forceReloadAndClearCache } from '../services/appUpdater';
 
 interface NavbarProps {
   currentTab: 'collection' | 'subscribers' | 'pricing' | 'expenses' | 'saas';
@@ -31,11 +29,11 @@ export const Navbar: FC<NavbarProps> = ({
   onLogout,
   onBackToAdmin,
   isImpersonating,
-  onOpenInstall,
+  onOpenInstall: _onOpenInstall,
   isSunlightMode,
   onToggleSunlightMode,
   uiMode = 'simple',
-  onToggleUiMode,
+  onToggleUiMode: _onToggleUiMode,
 }) => {
   return (
     <header className="bg-slate-950/90 backdrop-blur-md border-b border-slate-800 sticky top-0 z-40">
@@ -76,11 +74,6 @@ export const Navbar: FC<NavbarProps> = ({
                 نظام الجباية الذكي (Offline-Ready)
               </span>
             </div>
-          </div>
-
-          {/* شارة حالة المزامنة على الهواتف */}
-          <div className="flex md:hidden items-center gap-2">
-            <SyncBadge syncInfo={syncInfo} />
           </div>
         </div>
 
@@ -130,7 +123,7 @@ export const Navbar: FC<NavbarProps> = ({
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition-all whitespace-nowrap ${
                 currentTab === 'expenses'
                   ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20 font-bold'
-                  : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
+                : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
               }`}
             >
               <TrendingDown className="w-4 h-4" />
@@ -153,84 +146,36 @@ export const Navbar: FC<NavbarProps> = ({
           )}
         </nav>
 
-        {/* مؤشر الاتصال والمزامنة وقائمة المستخدم */}
-        <div className="flex items-center gap-2 sm:gap-3">
-          {/* زر تبديل الوضع السريع البسيط والوضع المتقدم */}
-          {onToggleUiMode && (
-            <button
-              onClick={onToggleUiMode}
-              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[11px] font-bold transition-all cursor-pointer ${
-                uiMode === 'simple'
-                  ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30 hover:bg-amber-500/20'
-                  : 'bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 hover:bg-indigo-500/20'
-              }`}
-              title={uiMode === 'simple' ? 'التبديل إلى الوضع الكامل المتقدم' : 'التبديل إلى الوضع السريع البسيط (الافتراضي)'}
-            >
-              {uiMode === 'simple' ? (
-                <>
-                  <Zap className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
-                  <span className="hidden sm:inline">الوضع البسيط</span>
-                </>
-              ) : (
-                <>
-                  <Sliders className="w-3.5 h-3.5 text-indigo-400" />
-                  <span className="hidden sm:inline">الوضع المتقدم</span>
-                </>
-              )}
-            </button>
-          )}
+        {/* عناصر التحكم العلوية: فقط شارة الواي فاي وملاصق لها زر الثيم وزر الخروج */}
+        <div className="flex items-center gap-2">
+          {/* زر وشارة الواي فاي */}
+          <SyncBadge syncInfo={syncInfo} />
 
-          {/* زر تبديل وضع الإضاءة النهارية للشمس المباشرة */}
+          {/* زر الثيم (النهاري / الليلي) جنب زر الواي فاي مباشرة */}
           {onToggleSunlightMode && (
             <button
               onClick={onToggleSunlightMode}
-              className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-[11px] font-bold transition-all cursor-pointer ${
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                 isSunlightMode
                   ? 'bg-amber-500 text-slate-950 font-black shadow-md shadow-amber-500/30'
                   : 'bg-slate-900 hover:bg-slate-800 text-amber-300 border border-slate-800'
               }`}
-              title={isSunlightMode ? 'العودة للوضع الليلي الفخم' : 'تفعيل وضع النهار عالي التباين للشمس المباشرة'}
+              title={isSunlightMode ? 'العودة للوضع الليلي' : 'تفعيل وضع النهار عالي التباين للشمس المباشرة'}
             >
               {isSunlightMode ? (
                 <Sun className="w-3.5 h-3.5 fill-slate-950 stroke-[2.5]" />
               ) : (
                 <SunMedium className="w-3.5 h-3.5 text-amber-400" />
               )}
-              <span className="hidden sm:inline">{isSunlightMode ? 'نهاري' : 'شمس'}</span>
+              <span className="text-[11px] hidden sm:inline">{isSunlightMode ? 'نهاري' : 'شمس'}</span>
             </button>
           )}
 
-          <button
-            onClick={forceReloadAndClearCache}
-            className="flex items-center gap-1 bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-amber-400 border border-slate-800 px-2 py-1.5 rounded-xl text-[11px] font-mono font-bold transition-all cursor-pointer"
-            title="تحديث فوري للمنظومة وتفريغ الكاش (Cache Buster)"
-          >
-            <RefreshCw className="w-3 h-3 text-amber-400" />
-            <span>{APP_VERSION}</span>
-          </button>
-
-          {onOpenInstall && (
-            <button
-              onClick={onOpenInstall}
-              className="hidden sm:flex items-center gap-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer"
-              title="تثبيت التطبيق على الجهاز وتجهيز قاعدة البيانات المحلية"
-            >
-              <Download className="w-3.5 h-3.5" />
-              <span>تثبيت كـ تطبيق</span>
-            </button>
-          )}
-
-          <div className="hidden md:block">
-            <SyncBadge syncInfo={syncInfo} />
-          </div>
-
-          <div className="flex items-center gap-2 border-r border-slate-800 pr-2">
-            <span className="text-xs text-slate-300 font-semibold hidden lg:inline">
-              {currentUser.fullName}
-            </span>
+          {/* زر تسجيل الخروج فقط */}
+          <div className="flex items-center gap-1.5 border-r border-slate-800 pr-2">
             <button
               onClick={onLogout}
-              className="flex items-center gap-1 bg-slate-900 hover:bg-slate-800 text-rose-400 border border-slate-800 px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer"
+              className="flex items-center gap-1 bg-slate-900 hover:bg-slate-800 text-rose-400 border border-slate-800 p-1.5 sm:px-2.5 sm:py-1 rounded-xl text-xs font-bold transition-all cursor-pointer"
               title="تسجيل الخروج"
             >
               <LogOut className="w-3.5 h-3.5" />

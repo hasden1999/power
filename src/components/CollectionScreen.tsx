@@ -262,9 +262,20 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
       };
     }
 
-    // إذا لم تكن الفاتورة محفوظة بعد في جدول الفواتير ولكن توجد دورة تسعيرة نشطة
-    if (latestCycle && sub.isActive) {
-      const unitPrice = calculateUnitPrice(sub, latestCycle);
+    // إذا لم تكن الفاتورة محفوظة بعد في جدول الفواتير ولكن المشترك نشط
+    if (sub.isActive) {
+      const activeCycle = latestCycle || {
+        id: 'fallback',
+        tenantId,
+        month: new Date().getMonth() + 1,
+        year: new Date().getFullYear(),
+        pricePerAmpereNormal: settings?.defaultPriceNormal || 12000,
+        pricePerAmpereGold: settings?.defaultPriceGold || 20000,
+        pricePerAmpereNight: 8000,
+        isClosed: false,
+        createdAt: new Date().toISOString(),
+      };
+      const unitPrice = calculateUnitPrice(sub, activeCycle as BillingCycle);
       const currentAmount =
         sub.subscriptionType === 'fixed'
           ? (sub.fixedPrice || 0)
@@ -573,9 +584,32 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
   };
 
   return (
-    <div className="space-y-4 pb-12">
+    <div className="space-y-2.5 pb-12">
       
-      {/* 1. شاشة القيادة التنفيذية الذكية للمولدة وجدار الديون والأمبيرات */}
+      {/* 1. حقل البحث عن المشترك في أعلى الصفحة تماماً */}
+      <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-2.5 sm:p-3 shadow-lg">
+        <div className="relative flex items-center">
+          <Search className="absolute right-3.5 w-5 h-5 text-amber-400 pointer-events-none" />
+          <input
+            type="text"
+            placeholder="🔍 ابحث باسم المشترك، رقم القاطع (الفيز)، الهاتف، أو الزقاق..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full bg-slate-950 border border-slate-700 focus:border-amber-500 rounded-xl pr-11 pl-10 py-2.5 sm:py-3 text-sm text-white placeholder-slate-400 focus:outline-none transition-all shadow-inner font-bold"
+          />
+          {searchTerm && (
+            <button
+              onClick={() => setSearchTerm('')}
+              className="absolute left-3 p-1 text-slate-400 hover:text-white bg-slate-800 rounded-lg transition-colors cursor-pointer"
+              title="مسح البحث"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* 2. شاشة القيادة الذكية: تسعيرة الشهر (أقل بروزاً) + المربعات الأربعة (2×2 تقضي على السكرول) */}
       <ExecutiveCockpit
         stats={cockpitStats}
         latestCycle={latestCycle}
@@ -586,39 +620,18 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
         onOpenPriceModal={() => setIsPriceModalOpen(true)}
       />
 
-      {/* 2. شريط البحث السريع والفلترة بالأزقة والديون الميدانية */}
-      <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-3 sm:p-4 space-y-3 shadow-lg">
+      {/* 3. شريط أدوات الفلترة بحسب الحالة ونمط العرض والأزقة */}
+      <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-2.5 sm:p-3 space-y-2.5 shadow-md">
         
-        <div className="flex flex-col sm:flex-row gap-2.5">
-          {/* حقل البحث البارز بالاسم أو القاطع أو الهاتف */}
-          <div className="relative flex-1 flex items-center">
-            <Search className="absolute right-3.5 w-5 h-5 text-amber-400 pointer-events-none" />
-            <input
-              type="text"
-              placeholder="🔍 ابحث باسم المشترك، رقم القاطع (الفيز)، الهاتف، أو الزقاق..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-700 focus:border-amber-500 rounded-2xl pr-11 pl-10 py-3 text-sm text-white placeholder-slate-400 focus:outline-none transition-all shadow-inner font-bold"
-            />
-            {searchTerm && (
-              <button
-                onClick={() => setSearchTerm('')}
-                className="absolute left-3 p-1 text-slate-400 hover:text-white bg-slate-800 rounded-xl transition-colors cursor-pointer"
-                title="مسح البحث"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            )}
-          </div>
-
+        <div className="flex flex-col sm:flex-row gap-2">
           {/* نمط العرض: بطاقات / قائمة سريعة للأزقة */}
-          <div className="flex items-center gap-1 bg-slate-950 p-1.5 rounded-2xl border border-slate-800 flex-shrink-0">
+          <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 flex-shrink-0">
             <button
               type="button"
               onClick={() => handleToggleViewMode('cards')}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-black transition-all cursor-pointer ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer ${
                 viewMode === 'cards'
-                  ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
+                  ? 'bg-amber-500 text-slate-950 shadow-sm'
                   : 'text-slate-400 hover:text-white'
               }`}
               title="نمط البطاقات الأنيقة"
@@ -629,12 +642,12 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
             <button
               type="button"
               onClick={() => handleToggleViewMode('compact')}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-black transition-all cursor-pointer ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer ${
                 viewMode === 'compact'
-                  ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
+                  ? 'bg-amber-500 text-slate-950 shadow-sm'
                   : 'text-slate-400 hover:text-white'
               }`}
-              title="قائمة سريعة ومضغوطة للأزقة (8-10 مشتركين بالشاشة)"
+              title="قائمة سريعة ومضغوطة للأزقة"
             >
               <List className="w-3.5 h-3.5" />
               <span>سريع للأزقة</span>

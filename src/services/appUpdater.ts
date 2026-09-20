@@ -1,4 +1,4 @@
-export const APP_VERSION = 'v2.8.0';
+export const APP_VERSION = 'v2.9.1';
 
 /**
  * دالة التفريغ الإجباري للذاكرة المؤقتة (Cache Buster)

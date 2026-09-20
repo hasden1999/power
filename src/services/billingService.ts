@@ -44,6 +44,69 @@ export async function getLatestActiveCycle(tenantId: string): Promise<BillingCyc
 }
 
 /**
+ * الحصول على الدورة النشطة أو إنشاؤها تلقائياً للشهر الحالي فوراً
+ * لضمان عدم بقاء أي مشترك جديد بدون فاتورة واحتساب اشتراكه وإضافته للمتأخرين مباشرة
+ */
+export async function getOrCreateLatestActiveCycle(tenantId: string): Promise<BillingCycle> {
+  const existing = await getLatestActiveCycle(tenantId);
+  if (existing) return existing;
+
+  const now = new Date();
+  const currentMonth = now.getMonth() + 1;
+  const currentYear = now.getFullYear();
+  const cycleId = `cycle-${tenantId}-${currentYear}-${currentMonth}`;
+
+  let priceNormal = 12000;
+  let priceGold = 20000;
+  let priceNight = 8000;
+
+  try {
+    const settings = await db.settings.get(tenantId);
+    if (settings) {
+      if (settings.defaultPriceNormal && settings.defaultPriceNormal > 0) {
+        priceNormal = settings.defaultPriceNormal;
+      }
+      if (settings.defaultPriceGold && settings.defaultPriceGold > 0) {
+        priceGold = settings.defaultPriceGold;
+      }
+    }
+  } catch (err) {
+    console.warn('تعذر قراءة إعدادات التسعيرة الافتراضية:', err);
+  }
+
+  const newCycle: BillingCycle = {
+    id: cycleId,
+    tenantId,
+    month: currentMonth,
+    year: currentYear,
+    pricePerAmpereNormal: priceNormal,
+    pricePerAmpereGold: priceGold,
+    pricePerAmpereNight: priceNight,
+    issueDate: now.toISOString(),
+    isClosed: false,
+    createdAt: now.toISOString(),
+  };
+
+  await db.billingCycles.put(newCycle);
+
+  try {
+    await db.syncQueue.add({
+      id: `sync-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
+      action: 'insert',
+      entity: 'cycles',
+      entityId: newCycle.id,
+      payload: newCycle,
+      createdAt: now.toISOString(),
+      attempts: 0,
+    });
+  } catch (syncErr) {
+    console.warn('خطأ طابور مزامنة دورة الفوترة:', syncErr);
+  }
+
+  return newCycle;
+}
+
+/**
  * مزامنة فورية ولحظية لفاتورة المشترك للشهر الحالي:
  * 1. إذا كان مشتركاً جديداً: يتم توليد فاتورته فوراً للشهر الحالي بناءً على عدد الأمبيرات والتسعيرة المحددة.
  * 2. إذا تم تعديل الأمبيرات في وسط الشهر: يتم تحديث الفاتورة فوراً لاحتساب القيمة الجديدة مع الحفاظ على الدفعات المسددة.
@@ -56,7 +119,7 @@ export async function syncSubscriberInvoiceForCurrentCycle(
     return null;
   }
 
-  const cycle = customCycle || (await getLatestActiveCycle(subscriber.tenantId));
+  const cycle = customCycle || (await getOrCreateLatestActiveCycle(subscriber.tenantId));
   if (!cycle) {
     return null;
   }
@@ -177,7 +240,7 @@ export async function syncSubscriberInvoiceForCurrentCycle(
  * للدورة الحالية وتحديث أي تغييرات سابقة في الأمبيرات
  */
 export async function syncAllMissingInvoices(tenantId: string): Promise<number> {
-  const latestCycle = await getLatestActiveCycle(tenantId);
+  const latestCycle = await getOrCreateLatestActiveCycle(tenantId);
   if (!latestCycle) return 0;
 
   const activeSubscribers = await db.subscribers
