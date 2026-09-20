@@ -65,7 +65,6 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
   // نوافذ الدفع والتأكيد
   const [payingSub, setPayingSub] = useState<{ sub: Subscriber; invoice?: Invoice } | null>(null);
   const [customAmount, setCustomAmount] = useState<string>('');
-  const [isOverpaymentConfirmed, setIsOverpaymentConfirmed] = useState(false);
   const [collectorName, setCollectorName] = useState<string>(
     currentUser?.fullName || currentUser?.username || settings?.ownerName || 'الجابي الميداني'
   );
@@ -462,11 +461,10 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
     const due = balance.remaining;
     setPayingSub({ sub, invoice: inv || balance.invoice });
     setCustomAmount(due > 0 ? due.toString() : '');
-    setIsOverpaymentConfirmed(false);
     setPaymentNote('');
   };
 
-  // تأكيد تسجيل الدفعة مع التحقق من عدم تجاوز الذمة إلا بتأكيد صريح
+  // تأكيد تسجيل الدفعة مع الرفض الصارم لأي مبلغ يتجاوز الذمة المطلوبة
   const handleConfirmPayment = async () => {
     if (!payingSub) return;
     const amountNum = parseFloat(customAmount);
@@ -477,13 +475,11 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
 
     const balance = getSubscriberBalance(payingSub.sub);
     const targetDue = balance.remaining;
-    const isOverpaying = targetDue > 0 && amountNum > targetDue;
-    const overpaymentDiff = isOverpaying ? amountNum - targetDue : 0;
 
-    // اشتراط تأكيد تسجيل الزيادة في حال كان المبلغ أكبر من الذمة المطلوبة
-    if (isOverpaying && !isOverpaymentConfirmed) {
+    // رفض قاطع لتسديد أكثر مما في ذمة المشترك
+    if (targetDue > 0 && amountNum > targetDue) {
       alert(
-        `⚠️ تنبيه هام:\nالمبلغ المدخل (${formatIQD(amountNum)}) أكبر من الذمة المطلوبة (${formatIQD(targetDue)}) بفارق زائد قدره (+${formatIQD(overpaymentDiff)}).\n\nالأصل تسديد الذمة فقط. إذا كان المشترك يسدد مقدماً، يرجى الضغط على زر (زر: تأكيد تسجيل الزيادة) البرتقالي لتأكيد العملية.`
+        `🚫 العملية مرفوضة!\n\nالمبلغ المدخل (${formatIQD(amountNum)}) أكبر من الذمة المطلوبة (${formatIQD(targetDue)}).\n\nالنظام يمنع تسديد أكثر مما في ذمة المشترك. الحد الأقصى المسموح بتسديده هو: ${formatIQD(targetDue)} فقط.`
       );
       return;
     }
@@ -503,17 +499,13 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
         }
       }
 
-      const cleanNoteWithSurplus = isOverpaying
-        ? (paymentNote ? `${paymentNote} (زيادة فائضة: +${formatIQD(overpaymentDiff)})` : `(تسديد زيادة مقدماً: +${formatIQD(overpaymentDiff)})`)
-        : paymentNote || undefined;
-
       const payment = await recordPayment({
         tenantId: currentTenantId,
         subscriberId: payingSub.sub.id,
         invoiceId,
         amount: amountNum,
         collectorName: collectorName || 'صاحب المولدة',
-        notes: cleanNoteWithSurplus,
+        notes: paymentNote || undefined,
         userId: currentUser?.id,
         userRole: currentUser?.role,
       });
@@ -1267,10 +1259,7 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
       {/* صفيحة تسجيل الدفعة السريعة (Quick Payment Bottom Sheet) */}
       <BottomSheet
         isOpen={Boolean(payingSub)}
-        onClose={() => {
-          setPayingSub(null);
-          setIsOverpaymentConfirmed(false);
-        }}
+        onClose={() => setPayingSub(null)}
         title={payingSub ? `تسجيل سند: ${payingSub.sub.fullName}` : 'تسجيل سند قبض'}
         subtitle={payingSub ? `القاطع: ${payingSub.sub.breakerNumber} (${payingSub.sub.amperes} أمبير) - ${payingSub.sub.street}` : ''}
         icon={<CreditCard className="w-5 h-5 text-amber-400" />}
@@ -1279,34 +1268,32 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
             const payingBalance = payingSub ? getSubscriberBalance(payingSub.sub) : null;
             const payingDue = payingBalance ? payingBalance.remaining : 0;
             const enteredAmt = parseFloat(customAmount) || 0;
-            const isOverpaying = payingDue > 0 && enteredAmt > payingDue;
-            const requiresConfirmation = isOverpaying && !isOverpaymentConfirmed;
+            const isExceeding = payingDue > 0 && enteredAmt > payingDue;
 
             return (
               <div className="flex gap-2">
                 <button
                   onClick={handleConfirmPayment}
-                  disabled={isSubmitting}
-                  className={`flex-1 flex items-center justify-center gap-2 font-black py-3 px-4 rounded-xl shadow-lg text-sm transition-all cursor-pointer ${
-                    requiresConfirmation
-                      ? 'bg-amber-600 hover:bg-amber-500 text-white shadow-amber-600/30 ring-2 ring-amber-400/50'
-                      : 'bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white shadow-emerald-600/20'
+                  disabled={isSubmitting || isExceeding || enteredAmt <= 0}
+                  className={`flex-1 flex items-center justify-center gap-2 font-black py-3 px-4 rounded-xl shadow-lg text-sm transition-all ${
+                    isExceeding
+                      ? 'bg-rose-950/80 border-2 border-rose-500/80 text-rose-300 cursor-not-allowed opacity-80'
+                      : 'bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white shadow-emerald-600/20 cursor-pointer disabled:opacity-50'
                   }`}
                 >
                   <Send className="w-4 h-4" />
                   <span>
                     {isSubmitting
                       ? 'جاري الحفظ...'
-                      : requiresConfirmation
-                      ? `تأكيد وقبض الزيادة (${formatIQD(enteredAmt)})`
+                      : isExceeding
+                      ? `🚫 مرفوض: يتجاوز الذمة (${formatIQD(payingDue)})`
+                      : enteredAmt > 0
+                      ? `تأكيد وقبض (${formatIQD(enteredAmt)})`
                       : 'تأكيد وقبض المبلغ'}
                   </span>
                 </button>
                 <button
-                  onClick={() => {
-                    setPayingSub(null);
-                    setIsOverpaymentConfirmed(false);
-                  }}
+                  onClick={() => setPayingSub(null)}
                   className="px-4 py-3 text-xs font-bold text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition-colors cursor-pointer"
                 >
                   إلغاء
@@ -1320,16 +1307,16 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
           const payingBalance = getSubscriberBalance(payingSub.sub);
           const payingDue = payingBalance.remaining;
           const enteredAmt = parseFloat(customAmount) || 0;
-          const isOverpaying = payingDue > 0 && enteredAmt > payingDue;
-          const overpaymentDiff = isOverpaying ? enteredAmt - payingDue : 0;
+          const isExceeding = payingDue > 0 && enteredAmt > payingDue;
+          const excessDiff = isExceeding ? enteredAmt - payingDue : 0;
 
           return (
             <div className="space-y-3.5">
               {/* إجمالي المستحق للتذكير */}
               <div className="bg-slate-950 p-3.5 rounded-2xl border border-slate-800 flex justify-between items-center">
                 <div>
-                  <span className="text-xs text-slate-400 block font-medium">إجمالي المبلغ المطلوب بذمته:</span>
-                  <span className="text-[11px] text-amber-500/80 font-bold">المطلوب تسديد هذا المبلغ فقط</span>
+                  <span className="text-xs text-slate-400 block font-medium">المبلغ المطلوب بذمته:</span>
+                  <span className="text-[11px] text-amber-500/80 font-bold">الحد الأقصى للسداد هو هذا المبلغ فقط</span>
                 </div>
                 <div className="text-left">
                   <span className="text-lg font-black text-amber-400 block font-mono">
@@ -1343,71 +1330,59 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
                 </div>
               </div>
 
-              {/* تنبيه واضح جداً عند إدخال مبلغ أكبر من الذمة مع زر تأكيد صريح لتسجيل هذه العملية */}
-              {isOverpaying && (
-                <div className="bg-amber-950/40 border-2 border-amber-500/70 p-3.5 rounded-2xl animate-in fade-in slide-in-from-top-2">
+              {/* تنبيه الرفض الصارم عند إدخال مبلغ أكبر من الذمة المطلوبة */}
+              {isExceeding && (
+                <div className="bg-rose-950/60 border-2 border-rose-500/90 p-3.5 rounded-2xl animate-in fade-in slide-in-from-top-2">
                   <div className="flex items-start gap-2.5">
-                    <AlertCircle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
-                    <div className="flex-1 space-y-2.5">
-                      <div className="text-xs text-amber-200 leading-relaxed font-bold">
-                        <span className="text-amber-300 font-black text-sm block mb-1">
-                          ⚠️ تنبيه: المبلغ المدخل أكبر من الذمة المطلوبة!
+                    <AlertCircle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
+                    <div className="flex-1 space-y-2">
+                      <div className="text-xs text-rose-200 font-bold leading-relaxed">
+                        <span className="text-rose-300 font-black text-sm block mb-0.5">
+                          🚫 العملية مرفوضة: لا يمكن تسديد أكثر مما في الذمة!
                         </span>
-                        <div className="text-[11px] text-slate-300 space-y-0.5">
-                          <div>المطلوب بذمته فقط: <strong className="text-amber-300 font-mono">{formatIQD(payingDue)}</strong></div>
-                          <div>المبلغ المدخل: <strong className="text-white font-mono">{formatIQD(enteredAmt)}</strong></div>
-                          <div>الزيادة الفائضة: <strong className="text-emerald-400 font-mono">+{formatIQD(overpaymentDiff)}</strong></div>
-                        </div>
+                        <span>
+                          المشترك مطلوب بذمته <strong className="text-amber-300 font-mono">{formatIQD(payingDue)}</strong> فقط، 
+                          والمبلغ المدخل ({formatIQD(enteredAmt)}) يتجاوزه بفارق زائد قدره (+{formatIQD(excessDiff)}).
+                        </span>
                       </div>
 
-                      <div className="flex flex-wrap gap-2 pt-1 border-t border-amber-500/20">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setCustomAmount(payingDue.toString());
-                            setIsOverpaymentConfirmed(false);
-                          }}
-                          className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 text-xs font-bold rounded-xl cursor-pointer transition-all active:scale-95"
-                        >
-                          🎯 ضبط على الذمة فقط ({formatIQD(payingDue)})
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => setIsOverpaymentConfirmed(true)}
-                          className={`px-3 py-1.5 text-xs font-black rounded-xl cursor-pointer transition-all active:scale-95 ${
-                            isOverpaymentConfirmed
-                              ? 'bg-emerald-600 text-white border border-emerald-400 shadow-md shadow-emerald-600/30'
-                              : 'bg-amber-500 hover:bg-amber-400 text-slate-950 font-black shadow-md shadow-amber-500/25 ring-2 ring-amber-300'
-                          }`}
-                        >
-                          {isOverpaymentConfirmed ? '✓ تم تأكيد تسجيل الزيادة بنجاح' : '⚡ زر: تأكيد تسجيل الزيادة لهذه العملية'}
-                        </button>
-                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setCustomAmount(payingDue.toString())}
+                        className="flex items-center gap-1.5 px-3 py-2 bg-rose-600 hover:bg-rose-500 active:scale-95 text-white text-xs font-black rounded-xl cursor-pointer transition-all shadow-md shadow-rose-600/30"
+                      >
+                        <span>🎯 تصحيح وضبط المبلغ إلى الذمة المطلوبة ({formatIQD(payingDue)})</span>
+                      </button>
                     </div>
                   </div>
                 </div>
               )}
 
-              {/* أزرار النقد العراقي السريع (Quick Iraqi Cash Chips) */}
+              {/* أزرار النقد العراقي السريع مع تعطيل المبالغ التي تتجاوز الذمة */}
               <div>
                 <label className="block text-xs font-bold text-slate-300 mb-1.5">
-                  مبالغ سريعة بنقرة واحدة:
+                  فئات سريعة (مسموح بما دون الذمة):
                 </label>
                 <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5">
-                  {[5000, 10000, 15000, 20000, 25000, 50000].map((quickVal) => (
-                    <button
-                      key={quickVal}
-                      type="button"
-                      onClick={() => {
-                        setCustomAmount(quickVal.toString());
-                        setIsOverpaymentConfirmed(false);
-                      }}
-                      className="bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-amber-500/40 text-amber-300 py-2 px-1 rounded-xl text-xs font-bold transition-all active:scale-95 cursor-pointer text-center"
-                    >
-                      {quickVal >= 1000 ? `${quickVal / 1000} ألف` : quickVal}
-                    </button>
-                  ))}
+                  {[5000, 10000, 15000, 20000, 25000, 50000].map((quickVal) => {
+                    const exceeds = payingDue > 0 && quickVal > payingDue;
+                    return (
+                      <button
+                        key={quickVal}
+                        type="button"
+                        disabled={exceeds}
+                        onClick={() => setCustomAmount(quickVal.toString())}
+                        className={`py-2 px-1 rounded-xl text-xs font-bold transition-all text-center ${
+                          exceeds
+                            ? 'bg-slate-950/40 border border-slate-900 text-slate-600 line-through opacity-30 cursor-not-allowed'
+                            : 'bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-amber-500/40 text-amber-300 active:scale-95 cursor-pointer'
+                        }`}
+                        title={exceeds ? `يتجاوز الذمة المطلوبة (${formatIQD(payingDue)})` : undefined}
+                      >
+                        {quickVal >= 1000 ? `${quickVal / 1000} ألف` : quickVal}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -1420,13 +1395,10 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
                   {payingDue > 0 && (
                     <button
                       type="button"
-                      onClick={() => {
-                        setCustomAmount(payingDue.toString());
-                        setIsOverpaymentConfirmed(false);
-                      }}
+                      onClick={() => setCustomAmount(payingDue.toString())}
                       className="text-[11px] text-amber-400 hover:underline font-bold cursor-pointer"
                     >
-                      تسديد كامل المتبقي ({formatIQD(payingDue)})
+                      تسديد كامل الذمة ({formatIQD(payingDue)})
                     </button>
                   )}
                 </div>
@@ -1435,15 +1407,12 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
                     type="text"
                     inputMode="numeric"
                     autoFocus
-                    placeholder="مثال: 50000"
+                    placeholder={`الحد الأقصى: ${formatIQD(payingDue)}`}
                     value={customAmount}
-                    onChange={(e) => {
-                      setCustomAmount(e.target.value.replace(/[^0-9]/g, ''));
-                      setIsOverpaymentConfirmed(false);
-                    }}
+                    onChange={(e) => setCustomAmount(e.target.value.replace(/[^0-9]/g, ''))}
                     className={`w-full bg-slate-950 border rounded-xl pr-3 pl-12 py-3 text-lg font-black focus:outline-none transition-all ${
-                      isOverpaying
-                        ? 'border-amber-500 text-amber-300 ring-2 ring-amber-500/30'
+                      isExceeding
+                        ? 'border-rose-500 text-rose-400 ring-2 ring-rose-500/40 bg-rose-950/20'
                         : 'border-slate-700 focus:border-amber-500 text-emerald-400'
                     }`}
                   />

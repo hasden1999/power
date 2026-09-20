@@ -365,6 +365,23 @@ export async function recordPayment(params: {
 
   const cleanCollector = (collectorName || 'الجابي').trim().slice(0, 80);
   const cleanNotes = notes ? notes.trim().slice(0, 300) : undefined;
+
+  // التحقق الحاسم: منع تسديد أكثر مما في ذمة المشترك
+  if (invoiceId) {
+    const invoice = await db.invoices.get(invoiceId);
+    if (invoice) {
+      const remainingDue = Math.max(0, invoice.totalDue - (invoice.totalPaid || 0));
+      if (remainingDue > 0 && cleanAmount > remainingDue) {
+        throw new Error(`🚫 مرفوض: المبلغ المدخل (${formatIQD(cleanAmount)}) يتجاوز الذمة المطلوبة (${formatIQD(remainingDue)}). لا يمكن دفع أكثر من المطلوب.`);
+      }
+    }
+  } else {
+    const sub = await db.subscribers.get(subscriberId);
+    if (sub && (sub.openingBalance || 0) > 0 && cleanAmount > sub.openingBalance) {
+      throw new Error(`🚫 مرفوض: المبلغ المدخل (${formatIQD(cleanAmount)}) يتجاوز الرصيد المطلوب (${formatIQD(sub.openingBalance)}).`);
+    }
+  }
+
   const paymentNumber = await getNextReceiptNumber(tenantId, cleanCollector);
 
   const payment: Payment = {
@@ -495,8 +512,28 @@ export function normalizeArabic(text: string): string {
 }
 
 /**
+ * فحص ما إذا كان السند مسجلاً في نفس اليوم الحالي
+ * (التعديل والإلغاء مسموح فقط في نفس يوم استلام الجباية)
+ */
+export function isPaymentFromToday(paymentDateStr?: string): boolean {
+  if (!paymentDateStr) return false;
+  try {
+    const pDate = new Date(paymentDateStr);
+    const today = new Date();
+    return (
+      pDate.getFullYear() === today.getFullYear() &&
+      pDate.getMonth() === today.getMonth() &&
+      pDate.getDate() === today.getDate()
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
  * تعديل وتصحيح سند قبض سابق تم تسجيله بالخطأ:
  * يعيد احتساب رصيد الفاتورة ومجموع المدفوعات المسددة ودفتر الأستاذ وسجل التدقيق
+ * ملاحظة: مسموح فقط في نفس اليوم الذي تم فيه استلام الجباية
  */
 export async function updatePayment(params: {
   paymentId: string;
@@ -510,11 +547,28 @@ export async function updatePayment(params: {
   const payment = await db.payments.get(paymentId);
   if (!payment) throw new Error('سند القبض غير موجود');
 
+  // التحقق الحاسم: التعديل مسموح فقط في نفس يوم الجباية
+  if (!isPaymentFromToday(payment.paymentDate)) {
+    throw new Error('لا يمكن تعديل السندات السابقة. التعديل مسموح فقط في نفس اليوم الذي تم فيه استلام الجباية.');
+  }
+
   const cleanNewAmount = roundIQD(newAmount);
   if (cleanNewAmount <= 0) throw new Error('يجب أن يكون المبلغ أكبر من الصفر');
 
   const oldAmount = payment.amount;
   const diff = cleanNewAmount - oldAmount;
+
+  // التحقق الحاسم: منع جعل مجموع المدفوعات يتجاوز إجمالي المطلوب للفاتورة
+  if (payment.invoiceId) {
+    const invoice = await db.invoices.get(payment.invoiceId);
+    if (invoice) {
+      const otherPaid = Math.max(0, (invoice.totalPaid || 0) - oldAmount);
+      if (otherPaid + cleanNewAmount > invoice.totalDue) {
+        throw new Error(`🚫 مرفوض: المبلغ المعدل يتجاوز الذمة المطلوبة للفاتورة (${formatIQD(invoice.totalDue)}).`);
+      }
+    }
+  }
+
   const now = new Date().toISOString();
 
   await db.transaction('rw', [db.payments, db.invoices, db.syncQueue, db.auditLogs, db.ledger], async () => {
@@ -620,6 +674,11 @@ export async function deletePayment(params: {
   const { paymentId, reason, userId, userRole } = params;
   const payment = await db.payments.get(paymentId);
   if (!payment) throw new Error('سند القبض غير موجود');
+
+  // التحقق الحاسم: الإلغاء مسموح فقط في نفس يوم الجباية
+  if (!isPaymentFromToday(payment.paymentDate)) {
+    throw new Error('لا يمكن إلغاء السندات السابقة. الإلغاء مسموح فقط في نفس اليوم الذي تم فيه استلام الجباية.');
+  }
 
   const now = new Date().toISOString();
 
