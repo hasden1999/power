@@ -12,7 +12,8 @@ import {
   getLatestActiveCycle
 } from '../services/billingService';
 import { logAuditAction } from '../services/auditService';
-import type { Subscriber, SubscriptionType, Payment, Invoice, UserAccount } from '../types';
+import { SubscriberPaymentLedgerModal } from './SubscriberPaymentLedgerModal';
+import type { Subscriber, SubscriptionType, Invoice, UserAccount } from '../types';
 import {
   Plus,
   Search,
@@ -84,6 +85,10 @@ export const SubscribersScreen: FC<SubscribersScreenProps> = ({ tenantId, curren
   // جلب أحدث دورة تسعيرة نشطة لحساب تكلفة المشتركين الفورية
   const latestCycle = useLiveQuery(
     () => getLatestActiveCycle(tenantId),
+    [tenantId]
+  );
+  const settings = useLiveQuery(
+    () => db.settings.get(tenantId),
     [tenantId]
   );
 
@@ -1212,136 +1217,17 @@ export const SubscribersScreen: FC<SubscribersScreenProps> = ({ tenantId, curren
         </div>
       )}
 
-      {/* نافذة كشف حساب المشترك (Statement Modal) */}
+      {/* نافذة سجل تسديدات المشترك الموثق بالتواريخ والأوقات */}
       {statementSub && (
-        <SubscriberStatementModal
+        <SubscriberPaymentLedgerModal
           subscriber={statementSub}
           onClose={() => setStatementSub(null)}
           payments={payments.filter((p) => p.subscriberId === statementSub.id)}
           invoices={invoices.filter((inv) => inv.subscriberId === statementSub.id)}
+          settings={settings}
         />
       )}
 
-    </div>
-  );
-};
-
-// مكون كشف الحساب وسجل الدفعات التاريخية
-const SubscriberStatementModal: FC<{
-  subscriber: Subscriber;
-  onClose: () => void;
-
-  payments: Payment[];
-  invoices: Invoice[];
-}> = ({ subscriber, onClose, payments, invoices }) => {
-  // إجمالي المبالغ المفوترة تاريخياً: مجموع مبالغ الأشهر الفعلية + الرصيد الافتتاحي - مجموع التخفيضات
-  const totalBilled =
-    invoices.length > 0
-      ? invoices.reduce((sum, inv) => sum + inv.currentAmount, 0) +
-        (subscriber.openingBalance || 0) -
-        invoices.reduce((sum, inv) => sum + (inv.discount || 0), 0)
-      : subscriber.openingBalance || 0;
-  const totalPaid = payments.reduce((sum, p) => sum + p.amount, 0);
-  const remaining = Math.max(0, totalBilled - totalPaid);
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-black/80 backdrop-blur-sm animate-in fade-in">
-      <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
-        
-        <div className="p-4 border-b border-slate-800 bg-slate-950 flex items-center justify-between">
-          <div>
-            <h3 className="font-bold text-base text-white">كشف حساب المشترك</h3>
-            <p className="text-xs text-amber-400 mt-0.5">
-              {subscriber.fullName} | القاطع: {subscriber.breakerNumber} ({subscriber.amperes} أمبير)
-            </p>
-          </div>
-          <button
-            onClick={onClose}
-            className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        <div className="p-4 overflow-y-auto space-y-4 flex-1">
-          {/* ملخص الحساب */}
-          <div className="grid grid-cols-3 gap-2 bg-slate-950 p-3 rounded-xl border border-slate-800 text-center">
-            <div>
-              <span className="text-[11px] text-slate-400 block">إجمالي المطلوب:</span>
-              <span className="font-bold text-sm text-slate-200">{formatIQD(totalBilled)}</span>
-            </div>
-            <div>
-              <span className="text-[11px] text-slate-400 block">إجمالي المسدد:</span>
-              <span className="font-bold text-sm text-emerald-400">{formatIQD(totalPaid)}</span>
-            </div>
-            <div>
-              <span className="text-[11px] text-slate-400 block">المتبقي حالياً:</span>
-              <span className={`font-bold text-sm ${remaining > 0 ? 'text-rose-400' : 'text-slate-300'}`}>
-                {formatIQD(remaining)}
-              </span>
-            </div>
-          </div>
-
-          {/* سجل الدفعات وسندات القبض */}
-          <div>
-            <h4 className="font-bold text-xs text-slate-300 mb-2 flex items-center gap-1.5">
-              <History className="w-3.5 h-3.5 text-amber-400" />
-              سجل الدفعات المستلمة ({payments.length})
-            </h4>
-
-            {payments.length === 0 ? (
-              <p className="text-xs text-slate-500 bg-slate-950/50 p-4 rounded-xl text-center">
-                لا توجد دفعات مسجلة لهذا المشترك حتى الآن
-              </p>
-            ) : (
-              <div className="space-y-2">
-                {payments.map((p) => (
-                  <div
-                    key={p.id}
-                    className="bg-slate-950/70 border border-slate-800 p-3 rounded-xl flex items-center justify-between text-xs"
-                  >
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-emerald-400 text-sm">
-                          {formatIQD(p.amount)}
-                        </span>
-                        <span className="text-[10px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded">
-                          {p.receiptNumber}
-                        </span>
-                      </div>
-                      <span className="text-[11px] text-slate-500 block mt-1">
-                        {new Date(p.paymentDate).toLocaleDateString('ar-IQ', {
-                          year: 'numeric',
-                          month: 'short',
-                          day: 'numeric',
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })}{' '}
-                        - المحصل: {p.collectorName}
-                      </span>
-                      {p.notes && <p className="text-[11px] text-slate-400 mt-0.5">ملاحظة: {p.notes}</p>}
-                    </div>
-
-                    <span className="text-[10px] text-emerald-500 font-bold bg-emerald-500/10 px-2 py-1 rounded">
-                      واصل
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="p-3 bg-slate-950 border-t border-slate-800 text-left">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 text-xs text-slate-300 bg-slate-800 hover:bg-slate-700 rounded-xl"
-          >
-            إغلاق
-          </button>
-        </div>
-
-      </div>
     </div>
   );
 };

@@ -13,6 +13,8 @@ import {
 import { logAuditAction } from '../services/auditService';
 import { ThermalReceiptModal } from './ThermalReceiptModal';
 import { BottomSheet } from './BottomSheet';
+import { ExecutiveCockpit, type CockpitStats } from './ExecutiveCockpit';
+import { SubscriberPaymentLedgerModal } from './SubscriberPaymentLedgerModal';
 import { bluetoothPrinter } from '../services/bluetoothPrinter';
 import type { Subscriber, Invoice, Payment, TenantSettings, BillingCycle, UserAccount } from '../types';
 import {
@@ -23,16 +25,13 @@ import {
   Send,
   SlidersHorizontal,
   DollarSign,
-  TrendingUp,
   CreditCard,
-  UserCheck,
   Zap,
   MessageSquare,
   X,
   LayoutGrid,
   List,
-  Percent,
-  Pencil
+  History
 } from 'lucide-react';
 
 interface CollectionScreenProps {
@@ -50,7 +49,8 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedStreet, setSelectedStreet] = useState<string>('all');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'unpaid' | 'partial' | 'paid'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'unpaid' | 'partial' | 'paid' | 'debt'>('all');
+  const [selectedLedgerSub, setSelectedLedgerSub] = useState<Subscriber | null>(null);
   const [viewMode, setViewMode] = useState<'cards' | 'compact'>(() => {
     return (localStorage.getItem('collection_view_mode') as 'cards' | 'compact') || 'cards';
   });
@@ -198,15 +198,6 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
     }
   };
 
-  // قائمة الشوارع الفريدة للفلتر
-  const streetsList = useMemo(() => {
-    const streets = new Set<string>();
-    subscribers.forEach((s) => {
-      if (s.street) streets.add(s.street.trim());
-    });
-    return Array.from(streets);
-  }, [subscribers]);
-
   // ربط الفواتير بالمشتركين - اعتماد أحدث فاتورة للمشترك دائماً
   const invoiceMap = useMemo(() => {
     const map = new Map<string, Invoice>();
@@ -222,18 +213,49 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
     return map;
   }, [invoices]);
 
-  // دالة موحدة ودقيقة لاحتساب رصيد واستحقاق المشترك بشكل فوري
+  // قائمة الشوارع الفريدة للفلتر مع عداد المشتركين
+  const streetsList = useMemo(() => {
+    const map = new Map<string, { count: number; unpaidCount: number }>();
+    subscribers.forEach((s) => {
+      const st = (s.street || '').trim();
+      if (!st) return;
+      const cur = map.get(st) || { count: 0, unpaidCount: 0 };
+      cur.count += 1;
+      const inv = invoiceMap.get(s.id);
+      const isUnpaid = inv ? (inv.totalDue - (inv.totalPaid || 0)) > 0 : (s.openingBalance || 0) > 0;
+      if (isUnpaid) cur.unpaidCount += 1;
+      map.set(st, cur);
+    });
+    return Array.from(map.entries()).map(([name, data]) => ({
+      name,
+      ...data,
+    }));
+  }, [subscribers, invoiceMap]);
+
+  // دالة موحدة ودقيقة لاحتساب رصيد واستحقاق المشترك مع الفصل الصريح للديون السابقة
   const getSubscriberBalance = (sub: Subscriber) => {
     const inv = invoiceMap.get(sub.id);
     if (inv) {
       const totalDue = inv.totalDue;
       const totalPaid = inv.totalPaid || 0;
       const remaining = Math.max(0, totalDue - totalPaid);
+      const currentAmount = inv.currentAmount || 0;
+      const previousDebt = inv.previousDebt || 0;
+
+      // أولوية السداد الرياضية (Waterfall): تطفئ الديون السابقة المرحلة أولاً
+      const remainingPreviousDebt = Math.max(0, previousDebt - totalPaid);
+      const paidTowardsCurrent = Math.max(0, totalPaid - previousDebt);
+      const remainingCurrentAmount = Math.max(0, currentAmount - paidTowardsCurrent);
+
       return {
         invoice: inv,
         totalDue,
         totalPaid,
         remaining,
+        currentAmount,
+        previousDebt,
+        remainingPreviousDebt,
+        remainingCurrentAmount,
         isPaid: remaining === 0,
         isPartial: totalPaid > 0 && remaining > 0,
         status: inv.status,
@@ -247,7 +269,8 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
         sub.subscriptionType === 'fixed'
           ? (sub.fixedPrice || 0)
           : roundIQD(sub.amperes * unitPrice);
-      const totalDue = currentAmount + (sub.openingBalance || 0);
+      const previousDebt = sub.openingBalance || 0;
+      const totalDue = currentAmount + previousDebt;
       const totalPaid = 0;
       const remaining = totalDue;
       return {
@@ -255,13 +278,18 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
         totalDue,
         totalPaid,
         remaining,
+        currentAmount,
+        previousDebt,
+        remainingPreviousDebt: previousDebt,
+        remainingCurrentAmount: currentAmount,
         isPaid: remaining === 0,
         isPartial: false,
         status: (remaining === 0 ? 'paid' : 'unpaid') as 'paid' | 'unpaid',
       };
     }
 
-    const totalDue = sub.openingBalance || 0;
+    const previousDebt = sub.openingBalance || 0;
+    const totalDue = previousDebt;
     const totalPaid = 0;
     const remaining = totalDue;
     return {
@@ -269,49 +297,82 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
       totalDue,
       totalPaid,
       remaining,
+      currentAmount: 0,
+      previousDebt,
+      remainingPreviousDebt: previousDebt,
+      remainingCurrentAmount: 0,
       isPaid: remaining === 0,
       isPartial: false,
       status: (remaining === 0 ? 'paid' : 'unpaid') as 'paid' | 'unpaid',
     };
   };
 
-  // إحصائيات التحصيل لليوم
-  const todayStats = useMemo(() => {
+  // إحصائيات شاشة القيادة التنفيذية الذكية (Executive Cockpit Stats)
+  const cockpitStats = useMemo<CockpitStats>(() => {
     const today = new Date().toDateString();
     const todayPayments = payments.filter(
       (p) => new Date(p.paymentDate).toDateString() === today
     );
 
     const totalCollectedToday = todayPayments.reduce((sum, p) => sum + p.amount, 0);
-    const uniquePaidSubscribersToday = new Set(todayPayments.map((p) => p.subscriberId)).size;
+    const todayReceiptsCount = todayPayments.length;
 
-    let totalDueAll = 0;
-    let totalPaidAll = 0;
+    let totalOutstandingDebt = 0;
+    let previousRolloverDebtTotal = 0;
+    let currentCycleDueTotal = 0;
+    let unpaidSubscribersCount = 0;
+    let partialSubscribersCount = 0;
+    let paidSubscribersCount = 0;
+    let totalCollectedThisCycle = 0;
+    let totalSubscribedAmperes = 0;
 
     subscribers.forEach((sub) => {
+      if (sub.isActive) {
+        totalSubscribedAmperes += sub.amperes || 0;
+      }
       const balance = getSubscriberBalance(sub);
-      totalDueAll += balance.totalDue;
-      totalPaidAll += balance.totalPaid;
+      totalOutstandingDebt += balance.remaining;
+      previousRolloverDebtTotal += balance.remainingPreviousDebt;
+      currentCycleDueTotal += balance.remainingCurrentAmount;
+      totalCollectedThisCycle += balance.totalPaid;
+
+      if (balance.isPaid) {
+        paidSubscribersCount++;
+      } else if (balance.isPartial) {
+        partialSubscribersCount++;
+        unpaidSubscribersCount++;
+      } else {
+        unpaidSubscribersCount++;
+      }
     });
 
-    const remainingUnpaidTotal = Math.max(0, totalDueAll - totalPaidAll);
-    const collectionPercentage = totalDueAll > 0 ? Math.round((totalPaidAll / totalDueAll) * 100) : 0;
+    const totalTargetBilling = totalCollectedThisCycle + totalOutstandingDebt;
+    const collectionPercentage =
+      totalTargetBilling > 0
+        ? Math.round((totalCollectedThisCycle / totalTargetBilling) * 100)
+        : 0;
 
     return {
+      totalOutstandingDebt,
+      previousRolloverDebtTotal,
+      currentCycleDueTotal,
+      unpaidSubscribersCount,
+      partialSubscribersCount,
+      paidSubscribersCount,
+      totalSubscribersCount: subscribers.length,
+      totalCollectedThisCycle,
       totalCollectedToday,
-      uniquePaidSubscribersToday,
-      remainingUnpaidTotal,
-      totalDueAll,
-      totalPaidAll,
+      todayReceiptsCount,
+      totalSubscribedAmperes: Math.round(totalSubscribedAmperes * 10) / 10,
+      totalTargetBilling,
       collectionPercentage,
     };
   }, [payments, subscribers, invoiceMap, latestCycle]);
 
-  // تصفية المشتركين بناءً على البحث والشارع وحالة الدفع
+  // تصفية المشتركين بناءً على البحث والشارع وحالة الدفع وجدار الديون
   const filteredSubscribers = useMemo(() => {
     return subscribers.filter((sub) => {
       const balance = getSubscriberBalance(sub);
-      const status = balance.status;
 
       // مطابقة البحث
       const term = searchTerm.trim().toLowerCase();
@@ -325,8 +386,17 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
       // مطابقة الشارع
       const matchesStreet = selectedStreet === 'all' || sub.street === selectedStreet;
 
-      // مطابقة حالة الدفع
-      const matchesStatus = statusFilter === 'all' || status === statusFilter;
+      // مطابقة حالة الدفع وفلتر الديون السابقة
+      let matchesStatus = true;
+      if (statusFilter === 'unpaid') {
+        matchesStatus = !balance.isPaid;
+      } else if (statusFilter === 'partial') {
+        matchesStatus = balance.isPartial;
+      } else if (statusFilter === 'paid') {
+        matchesStatus = balance.isPaid;
+      } else if (statusFilter === 'debt') {
+        matchesStatus = balance.remainingPreviousDebt > 0;
+      }
 
       return matchesSearch && matchesStreet && matchesStatus;
     });
@@ -505,120 +575,19 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
   return (
     <div className="space-y-4 pb-12">
       
-      {/* شريط تسعيرة الأمبير المباشرة للشهر الحالي مع إمكانية التعديل بلمسة واحدة */}
-      <div className="bg-gradient-to-r from-amber-500/15 via-slate-900 to-slate-900 border border-amber-500/30 rounded-2xl p-3 sm:p-3.5 shadow-lg flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 flex-shrink-0 shadow-inner">
-            <Zap className="w-5 h-5 fill-amber-400" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-black text-amber-400 uppercase tracking-wider">
-                تسعيرة شهر {latestCycle ? `${latestCycle.month} / ${latestCycle.year}` : `${new Date().getMonth() + 1} / ${new Date().getFullYear()}`}
-              </span>
-              <span className="text-[10px] bg-amber-500/20 text-amber-300 font-bold px-1.5 py-0.5 rounded border border-amber-500/30">
-                مباشر
-              </span>
-            </div>
-            <div className="flex items-baseline gap-2 mt-0.5">
-              <span className="text-base sm:text-lg font-black text-white">
-                {latestCycle ? formatIQD(latestCycle.pricePerAmpereNormal) : '12,000 د.ع'}
-              </span>
-              <span className="text-[11px] text-slate-400">للأمبير العادي</span>
-              {latestCycle && latestCycle.pricePerAmpereGold > latestCycle.pricePerAmpereNormal && (
-                <>
-                  <span className="text-slate-600">•</span>
-                  <span className="text-xs font-bold text-amber-300">
-                    {formatIQD(latestCycle.pricePerAmpereGold)} (ذهبي)
-                  </span>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
+      {/* 1. شاشة القيادة التنفيذية الذكية للمولدة وجدار الديون والأمبيرات */}
+      <ExecutiveCockpit
+        stats={cockpitStats}
+        latestCycle={latestCycle}
+        settings={settings}
+        currentUser={currentUser}
+        activeFilter={statusFilter}
+        onFilterSelect={(filter) => setStatusFilter(filter)}
+        onOpenPriceModal={() => setIsPriceModalOpen(true)}
+      />
 
-        {currentUser?.role !== 'collector' && (
-          <button
-            type="button"
-            onClick={() => setIsPriceModalOpen(true)}
-            className="flex items-center justify-center gap-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 px-3.5 py-2 rounded-xl text-xs font-black transition-all shadow-md shadow-amber-500/20 cursor-pointer active:scale-95 flex-shrink-0"
-          >
-            <Pencil className="w-3.5 h-3.5" />
-            <span>تعديل سعر الأمبير لهذا الشهر</span>
-          </button>
-        )}
-      </div>
-
-      {/* 1. لوحة المؤشرات المالية المدمجة (Fintech Summary Bar) */}
-      <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3 sm:p-3.5 shadow-lg backdrop-blur-sm">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3">
-          
-          {/* مقبوضات اليوم */}
-          <div className="bg-slate-950/70 border border-slate-800/80 rounded-xl p-2.5 sm:p-3 flex items-center gap-2.5 sm:gap-3">
-            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 flex-shrink-0">
-              <DollarSign className="w-4 h-4 sm:w-5 sm:h-5" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <span className="text-[10px] sm:text-[11px] font-medium text-slate-400 block truncate">مقبوضات اليوم</span>
-              <span className="text-sm sm:text-base font-black text-amber-400 block truncate">
-                {formatIQD(todayStats.totalCollectedToday)}
-              </span>
-            </div>
-          </div>
-
-          {/* المسددين اليوم */}
-          <div className="bg-slate-950/70 border border-slate-800/80 rounded-xl p-2.5 sm:p-3 flex items-center gap-2.5 sm:gap-3">
-            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 flex-shrink-0">
-              <UserCheck className="w-4 h-4 sm:w-5 sm:h-5" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <span className="text-[10px] sm:text-[11px] font-medium text-slate-400 block truncate">المسددين اليوم</span>
-              <div className="flex items-baseline gap-1">
-                <span className="text-sm sm:text-base font-black text-emerald-400">
-                  {todayStats.uniquePaidSubscribersToday}
-                </span>
-                <span className="text-[10px] text-slate-400">مشترك</span>
-              </div>
-            </div>
-          </div>
-
-          {/* المتبقي المطلوب */}
-          <div className="bg-slate-950/70 border border-slate-800/80 rounded-xl p-2.5 sm:p-3 flex items-center gap-2.5 sm:gap-3">
-            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-400 flex-shrink-0">
-              <TrendingUp className="w-4 h-4 sm:w-5 sm:h-5" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <span className="text-[10px] sm:text-[11px] font-medium text-slate-400 block truncate">المتبقي المطلوب</span>
-              <span className="text-sm sm:text-base font-black text-rose-400 block truncate">
-                {formatIQD(todayStats.remainingUnpaidTotal)}
-              </span>
-            </div>
-          </div>
-
-          {/* نسبة إنجاز التحصيل */}
-          <div className="bg-slate-950/70 border border-slate-800/80 rounded-xl p-2.5 sm:p-3 flex items-center gap-2.5 sm:gap-3">
-            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400 flex-shrink-0">
-              <Percent className="w-4 h-4 sm:w-5 sm:h-5" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center justify-between text-[10px] sm:text-[11px] text-slate-400 mb-1">
-                <span>نسبة التحصيل</span>
-                <span className="font-bold text-cyan-300">{todayStats.collectionPercentage}%</span>
-              </div>
-              <div className="w-full bg-slate-800 h-1.5 sm:h-2 rounded-full overflow-hidden">
-                <div
-                  className="bg-gradient-to-r from-amber-500 to-emerald-500 h-full rounded-full transition-all duration-500"
-                  style={{ width: `${Math.min(100, todayStats.collectionPercentage)}%` }}
-                />
-              </div>
-            </div>
-          </div>
-
-        </div>
-      </div>
-
-      {/* 2. شريط البحث السريع والفلترة بالأزقة (مخصص للعمل الميداني) */}
-      <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3 sm:p-4 space-y-3 shadow-lg">
+      {/* 2. شريط البحث السريع والفلترة بالأزقة والديون الميدانية */}
+      <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-3 sm:p-4 space-y-3 shadow-lg">
         
         <div className="flex flex-col sm:flex-row gap-2.5">
           {/* حقل البحث البارز بالاسم أو القاطع أو الهاتف */}
@@ -629,12 +598,12 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
               placeholder="🔍 ابحث باسم المشترك، رقم القاطع (الفيز)، الهاتف، أو الزقاق..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-700 focus:border-amber-500 rounded-xl pr-11 pl-10 py-3 text-sm text-white placeholder-slate-400 focus:outline-none transition-all shadow-inner"
+              className="w-full bg-slate-950 border border-slate-700 focus:border-amber-500 rounded-2xl pr-11 pl-10 py-3 text-sm text-white placeholder-slate-400 focus:outline-none transition-all shadow-inner font-bold"
             />
             {searchTerm && (
               <button
                 onClick={() => setSearchTerm('')}
-                className="absolute left-3 p-1 text-slate-400 hover:text-white bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                className="absolute left-3 p-1 text-slate-400 hover:text-white bg-slate-800 rounded-xl transition-colors cursor-pointer"
                 title="مسح البحث"
               >
                 <X className="w-4 h-4" />
@@ -643,13 +612,13 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
           </div>
 
           {/* نمط العرض: بطاقات / قائمة سريعة للأزقة */}
-          <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 flex-shrink-0">
+          <div className="flex items-center gap-1 bg-slate-950 p-1.5 rounded-2xl border border-slate-800 flex-shrink-0">
             <button
               type="button"
               onClick={() => handleToggleViewMode('cards')}
-              className={`flex items-center gap-1 px-2.5 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-black transition-all cursor-pointer ${
                 viewMode === 'cards'
-                  ? 'bg-amber-500 text-slate-950 font-black shadow-md shadow-amber-500/20'
+                  ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
                   : 'text-slate-400 hover:text-white'
               }`}
               title="نمط البطاقات الأنيقة"
@@ -660,9 +629,9 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
             <button
               type="button"
               onClick={() => handleToggleViewMode('compact')}
-              className={`flex items-center gap-1 px-2.5 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-black transition-all cursor-pointer ${
                 viewMode === 'compact'
-                  ? 'bg-amber-500 text-slate-950 font-black shadow-md shadow-amber-500/20'
+                  ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
                   : 'text-slate-400 hover:text-white'
               }`}
               title="قائمة سريعة ومضغوطة للأزقة (8-10 مشتركين بالشاشة)"
@@ -672,11 +641,11 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
             </button>
           </div>
 
-          {/* فلتر حالة التسديد بأزرار واضحة وسهلة اللمس */}
-          <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 overflow-x-auto no-scrollbar">
+          {/* فلتر حالة التسديد بأزرار تفاعلية واضحة مع الأعداد */}
+          <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-2xl border border-slate-800 overflow-x-auto no-scrollbar">
             <button
               onClick={() => setStatusFilter('all')}
-              className={`px-3 py-2 rounded-lg text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
+              className={`px-3 py-2 rounded-xl text-xs font-black whitespace-nowrap transition-all cursor-pointer ${
                 statusFilter === 'all'
                   ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
                   : 'text-slate-400 hover:text-white'
@@ -686,65 +655,85 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
             </button>
             <button
               onClick={() => setStatusFilter('unpaid')}
-              className={`px-3 py-2 rounded-lg text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
+              className={`px-3 py-2 rounded-xl text-xs font-black whitespace-nowrap transition-all cursor-pointer ${
                 statusFilter === 'unpaid'
-                  ? 'bg-rose-500 text-slate-950 shadow-md shadow-rose-500/20'
+                  ? 'bg-rose-500 text-white shadow-md shadow-rose-500/20'
                   : 'text-slate-400 hover:text-rose-400'
               }`}
             >
-              غير مسدد
+              🔴 المتأخرون ({cockpitStats.unpaidSubscribersCount})
+            </button>
+            <button
+              onClick={() => setStatusFilter('debt')}
+              className={`px-3 py-2 rounded-xl text-xs font-black whitespace-nowrap transition-all cursor-pointer ${
+                statusFilter === 'debt'
+                  ? 'bg-amber-600 text-white shadow-md shadow-amber-600/20'
+                  : 'text-slate-400 hover:text-amber-400'
+              }`}
+              title="مشتركون بذمتهم ديون مرحلة من أشهر سابقة"
+            >
+              ⚠️ ديون سابقة ({subscribers.filter((s) => getSubscriberBalance(s).remainingPreviousDebt > 0).length})
             </button>
             <button
               onClick={() => setStatusFilter('partial')}
-              className={`px-3 py-2 rounded-lg text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
+              className={`px-3 py-2 rounded-xl text-xs font-black whitespace-nowrap transition-all cursor-pointer ${
                 statusFilter === 'partial'
                   ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
                   : 'text-slate-400 hover:text-amber-400'
               }`}
             >
-              جزئي
+              جزئي ({cockpitStats.partialSubscribersCount})
             </button>
             <button
               onClick={() => setStatusFilter('paid')}
-              className={`px-3 py-2 rounded-lg text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
+              className={`px-3 py-2 rounded-xl text-xs font-black whitespace-nowrap transition-all cursor-pointer ${
                 statusFilter === 'paid'
                   ? 'bg-emerald-500 text-slate-950 shadow-md shadow-emerald-500/20'
                   : 'text-slate-400 hover:text-emerald-400'
               }`}
             >
-              خالص
+              🟢 خالص ({cockpitStats.paidSubscribersCount})
             </button>
           </div>
         </div>
 
-        {/* فلاتر سريعة للأزقة والشوارع (أزرار أفقية سهلة الضغط) */}
+        {/* فلاتر سريعة للأزقة والشوارع (أزرار أفقية مع عدد المشتركين) */}
         {streetsList.length > 0 && (
           <div className="flex items-center gap-1.5 overflow-x-auto pb-1 pt-1 text-xs">
-            <span className="text-slate-400 flex items-center gap-1 font-medium whitespace-nowrap ml-1">
-              <SlidersHorizontal className="w-3.5 h-3.5" />
+            <span className="text-slate-400 flex items-center gap-1 font-bold whitespace-nowrap ml-1">
+              <SlidersHorizontal className="w-3.5 h-3.5 text-amber-400" />
               الشارع:
             </span>
             <button
               onClick={() => setSelectedStreet('all')}
-              className={`px-3 py-1 rounded-lg transition-all whitespace-nowrap ${
+              className={`px-3 py-1.5 rounded-xl transition-all whitespace-nowrap font-bold cursor-pointer ${
                 selectedStreet === 'all'
-                  ? 'bg-slate-700 text-amber-300 font-bold border border-slate-600'
-                  : 'bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800'
+                  ? 'bg-slate-700 text-amber-300 border border-slate-600 shadow'
+                  : 'bg-slate-950 text-slate-400 hover:text-slate-200 border border-slate-800'
               }`}
             >
-              كل الأزقة
+              كل الأزقة ({subscribers.length})
             </button>
             {streetsList.map((st) => (
               <button
-                key={st}
-                onClick={() => setSelectedStreet(st)}
-                className={`px-3 py-1 rounded-lg transition-all whitespace-nowrap ${
-                  selectedStreet === st
-                    ? 'bg-slate-700 text-amber-300 font-bold border border-slate-600'
-                    : 'bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800'
+                key={st.name}
+                onClick={() => setSelectedStreet(st.name)}
+                className={`px-3 py-1.5 rounded-xl transition-all whitespace-nowrap font-bold flex items-center gap-1.5 cursor-pointer ${
+                  selectedStreet === st.name
+                    ? 'bg-slate-700 text-amber-300 border border-slate-600 shadow'
+                    : 'bg-slate-950 text-slate-400 hover:text-slate-200 border border-slate-800'
                 }`}
               >
-                {st}
+                <span>{st.name}</span>
+                <span
+                  className={`text-[10px] px-1.5 py-0.2 rounded-full font-black ${
+                    st.unpaidCount > 0
+                      ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                      : 'bg-slate-800 text-slate-400'
+                  }`}
+                >
+                  {st.count}
+                </span>
               </button>
             ))}
           </div>
@@ -801,7 +790,7 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
               return (
                 <div
                   key={sub.id}
-                  className={`bg-slate-900/90 border rounded-xl p-2.5 flex items-center justify-between gap-2.5 transition-all fintech-card-shadow ${
+                  className={`bg-slate-900/90 border rounded-2xl p-2.5 sm:p-3 flex items-center justify-between gap-2.5 transition-all fintech-card-shadow ${
                     isPaid
                       ? 'border-emerald-500/25 opacity-75'
                       : isPartial
@@ -819,7 +808,7 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-1.5 truncate">
                         <span
-                          className="font-bold text-sm text-white truncate hover:text-amber-400 cursor-pointer"
+                          className="font-black text-sm text-white truncate hover:text-amber-400 cursor-pointer"
                           onClick={() => openPaymentModal(sub)}
                           title="انقر لتفاصيل السند أو الدفع المخصص"
                         >
@@ -835,15 +824,20 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
                             جزئي
                           </span>
                         )}
+                        {balance.remainingPreviousDebt > 0 && (
+                          <span className="text-[10px] font-black text-rose-300 bg-rose-500/20 border border-rose-500/30 px-1.5 py-0.2 rounded">
+                            سابق: {formatIQD(balance.remainingPreviousDebt)}
+                          </span>
+                        )}
                       </div>
                       <div className="text-[11px] text-slate-400 flex items-center gap-2 truncate mt-0.5">
-                        <span className="text-amber-400 font-semibold">{sub.breakerNumber}</span>
+                        <span className="text-amber-400 font-black">{sub.breakerNumber}</span>
                         <span>•</span>
                         <span>{sub.amperes}A</span>
                         {sub.street && (
                           <>
                             <span>•</span>
-                            <span className="truncate">{sub.street}</span>
+                            <span className="truncate text-slate-400">{sub.street}</span>
                           </>
                         )}
                       </div>
@@ -854,7 +848,7 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
                   <div className="flex items-center gap-2 flex-shrink-0">
                     <div className="text-left">
                       <span
-                        className={`text-sm font-black block tracking-tight ${
+                        className={`text-sm sm:text-base font-black block tracking-tight ${
                           isPaid ? 'text-emerald-400' : isPartial ? 'text-amber-400' : 'text-rose-400'
                         }`}
                       >
@@ -863,34 +857,50 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
                     </div>
 
                     {isPaid ? (
-                      <button
-                        onClick={() => openPaymentModal(sub)}
-                        className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition cursor-pointer"
-                        title="تفاصيل السند"
-                      >
-                        سند
-                      </button>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => setSelectedLedgerSub(sub)}
+                          className="p-1.5 text-amber-400 hover:text-amber-300 hover:bg-slate-800 bg-slate-950 rounded-xl border border-slate-800 transition-colors cursor-pointer"
+                          title="سجل التسديدات الموثق بالتواريخ"
+                        >
+                          <History className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => openPaymentModal(sub)}
+                          className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition cursor-pointer"
+                          title="سند جديد"
+                        >
+                          سند
+                        </button>
+                      </div>
                     ) : (
                       <div className="flex items-center gap-1">
                         <button
                           onClick={() => handleQuickFullPayment(sub)}
                           disabled={isSubmitting}
-                          className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-black text-xs shadow-sm transition cursor-pointer flex items-center gap-1"
+                          className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-black text-xs shadow-sm transition cursor-pointer flex items-center gap-1"
                           title="قبض كامل بلمسة واحدة"
                         >
                           <Zap className="w-3.5 h-3.5 fill-slate-950" />
                           <span>قبض</span>
                         </button>
                         <button
+                          onClick={() => setSelectedLedgerSub(sub)}
+                          className="p-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 text-amber-400 border border-slate-800 text-xs transition cursor-pointer"
+                          title="سجل التسديدات الموثق بالتواريخ والأوقات"
+                        >
+                          <History className="w-3.5 h-3.5" />
+                        </button>
+                        <button
                           onClick={() => handleSendDebtReminder(sub)}
-                          className="p-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 text-xs transition cursor-pointer"
+                          className="p-1.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 text-xs transition cursor-pointer"
                           title="تذكير واتساب"
                         >
                           <MessageSquare className="w-3.5 h-3.5" />
                         </button>
                         <button
                           onClick={() => openPaymentModal(sub)}
-                          className="p-1.5 text-slate-300 hover:text-white hover:bg-slate-800 bg-slate-950 rounded-lg border border-slate-800 transition-colors cursor-pointer"
+                          className="p-1.5 text-slate-300 hover:text-white hover:bg-slate-800 bg-slate-950 rounded-xl border border-slate-800 transition-colors cursor-pointer"
                           title="دفع مخصص / جزئي"
                         >
                           <DollarSign className="w-3.5 h-3.5" />
@@ -908,12 +918,12 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {filteredSubscribers.map((sub) => {
               const balance = getSubscriberBalance(sub);
-              const { totalDue, totalPaid, remaining, isPaid, isPartial } = balance;
+              const { totalPaid, remaining, isPaid, isPartial } = balance;
 
               return (
                 <div
                   key={sub.id}
-                  className={`bg-slate-900/90 border rounded-2xl p-4 transition-all duration-200 flex flex-col justify-between gap-3 shadow-md hover:border-slate-600 ${
+                  className={`bg-slate-900/90 border rounded-3xl p-4 transition-all duration-200 flex flex-col justify-between gap-3.5 shadow-md hover:border-slate-600 ${
                     isPaid
                       ? 'border-emerald-500/30 hover:border-emerald-500/60'
                       : isPartial
@@ -924,112 +934,148 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
                   {/* الرأس: الاسم ورقم القاطع */}
                   <div className="flex items-start justify-between gap-2">
                     <div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <h4
                           onClick={() => openPaymentModal(sub)}
-                          className="font-bold text-base text-white hover:text-amber-400 cursor-pointer"
+                          className="font-black text-base text-white hover:text-amber-400 cursor-pointer"
                         >
                           {sub.fullName}
                         </h4>
                         {isPaid && (
-                          <span className="flex items-center gap-0.5 text-[10px] font-bold bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded-full border border-emerald-500/30">
+                          <span className="flex items-center gap-0.5 text-[10px] font-bold bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-500/30">
                             <CheckCircle className="w-3 h-3" />
                             خالص
                           </span>
                         )}
                         {isPartial && (
-                          <span className="flex items-center gap-0.5 text-[10px] font-bold bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded-full border border-amber-500/30">
+                          <span className="flex items-center gap-0.5 text-[10px] font-bold bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded-full border border-amber-500/30">
                             <Clock className="w-3 h-3" />
                             جزئي
                           </span>
                         )}
                         {!isPaid && !isPartial && (
-                          <span className="flex items-center gap-0.5 text-[10px] font-bold bg-rose-500/20 text-rose-400 px-1.5 py-0.5 rounded-full border border-rose-500/30">
+                          <span className="flex items-center gap-0.5 text-[10px] font-bold bg-rose-500/20 text-rose-400 px-2 py-0.5 rounded-full border border-rose-500/30">
                             <AlertCircle className="w-3 h-3" />
                             مطلوب
                           </span>
                         )}
                       </div>
                       <p className="text-xs text-slate-400 mt-1 flex items-center gap-1.5">
-                        <span>📍 {sub.street}</span>
+                        <span>📍 {sub.street || 'بدون زقاق'}</span>
                       </p>
                     </div>
 
                     {/* وسم رقم القاطع والأمبيرات */}
-                    <div className="text-left bg-slate-950 px-2.5 py-1.5 rounded-xl border border-slate-800">
+                    <div className="text-left bg-slate-950 px-3 py-1.5 rounded-2xl border border-slate-800 flex-shrink-0">
                       <div className="text-xs font-black text-amber-400 tracking-wider">
                         {sub.breakerNumber || 'قاطع'}
                       </div>
-                      <div className="text-[11px] text-slate-300 font-medium">
+                      <div className="text-[11px] text-slate-300 font-bold">
                         {sub.amperes} أمبير
                       </div>
                     </div>
                   </div>
 
-                  {/* التفاصيل المالية */}
-                  <div className="bg-slate-950/70 p-2.5 rounded-xl border border-slate-800/80 text-xs space-y-1.5">
+                  {/* التفاصيل المالية المزدوجة المفصلة بدقة */}
+                  <div className="bg-slate-950/80 p-3 rounded-2xl border border-slate-800/80 text-xs space-y-1.5">
+                    {/* ديون سابقة مرحلة إن وجدت */}
+                    {balance.remainingPreviousDebt > 0 && (
+                      <div className="flex justify-between items-center bg-rose-950/40 border border-rose-500/30 text-rose-300 rounded-xl px-2.5 py-1.5 font-bold">
+                        <span>⏮️ ديون سابقة مرحلة:</span>
+                        <strong className="font-black text-rose-400">{formatIQD(balance.remainingPreviousDebt)}</strong>
+                      </div>
+                    )}
+
+                    {/* استحقاق الشهر الحالي */}
                     <div className="flex justify-between text-slate-400">
-                      <span>المبلغ المستحق:</span>
-                      <span className="font-bold text-slate-200">{formatIQD(totalDue)}</span>
+                      <span>📅 اشتراك الشهر الحالي:</span>
+                      <span className="font-bold text-slate-200">{formatIQD(balance.remainingCurrentAmount)}</span>
                     </div>
+
                     {totalPaid > 0 && (
                       <div className="flex justify-between text-emerald-400">
-                        <span>الواصل:</span>
+                        <span>الواصل حتى الآن:</span>
                         <span className="font-semibold">{formatIQD(totalPaid)}</span>
                       </div>
                     )}
-                    <div className="flex justify-between items-center pt-1 border-t border-slate-800/80 font-bold">
+
+                    <div className="flex justify-between items-center pt-1.5 border-t border-slate-800 font-bold">
                       <span className={remaining > 0 ? 'text-rose-400' : 'text-emerald-400'}>
-                        {remaining > 0 ? 'المتبقي للتسديد:' : 'الرصيد خالص:'}
+                        {remaining > 0 ? 'إجمالي المطلوب للتسديد:' : 'الحساب خالص بالكامل:'}
                       </span>
-                      <span className={`text-sm ${remaining > 0 ? 'text-rose-400 font-black' : 'text-emerald-400'}`}>
+                      <span className={`text-base font-black ${remaining > 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
                         {remaining > 0 ? formatIQD(remaining) : '0 د.ع'}
                       </span>
                     </div>
                   </div>
 
                   {/* أزرار التحصيل الميداني السريع */}
-                  <div className="pt-1 space-y-1.5">
+                  <div className="pt-1 space-y-2">
                     {isPaid ? (
-                      <button
-                        onClick={() => openPaymentModal(sub)}
-                        className="w-full flex items-center justify-center gap-2 bg-slate-800/80 hover:bg-slate-700 text-slate-300 font-semibold py-2 px-3 rounded-xl border border-slate-700 text-xs transition-colors cursor-pointer"
-                      >
-                        <CreditCard className="w-3.5 h-3.5" />
-                        قبض إضافي أو دفع مقدم
-                      </button>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedLedgerSub(sub)}
+                          className="flex items-center justify-center gap-1.5 bg-slate-950 hover:bg-slate-800 text-amber-400 border border-amber-500/30 font-bold py-2.5 px-2 rounded-xl text-xs transition cursor-pointer"
+                          title="عرض سجل تسديدات المشترك الموثق بالتواريخ"
+                        >
+                          <History className="w-3.5 h-3.5" />
+                          <span>سجل التسديد</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => openPaymentModal(sub)}
+                          className="flex items-center justify-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold py-2.5 px-2 rounded-xl border border-slate-700 text-xs transition cursor-pointer"
+                        >
+                          <CreditCard className="w-3.5 h-3.5" />
+                          <span>سند جديد</span>
+                        </button>
+                      </div>
                     ) : (
                       <>
                         {/* زر القبض الكامل الفوري بلمسة واحدة */}
                         <button
                           onClick={() => handleQuickFullPayment(sub)}
                           disabled={isSubmitting}
-                          className="w-full flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-black py-2.5 px-3 rounded-xl shadow-lg shadow-amber-500/20 text-xs sm:text-sm transition-all cursor-pointer"
+                          className="w-full flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-black py-2.5 px-3 rounded-2xl shadow-lg shadow-amber-500/20 text-xs sm:text-sm transition-all cursor-pointer"
                           title="قبض المبلغ المتبقي كاملاً فوراً"
                         >
                           <Zap className="w-4 h-4 fill-slate-950 stroke-[2.5]" />
                           <span>⚡ قبض كامل ({formatIQD(remaining)})</span>
                         </button>
 
-                        <div className="grid grid-cols-2 gap-1.5 text-xs">
+                        <div className="grid grid-cols-3 gap-1.5 text-xs">
+                          {/* زر سجل تسديدات المشترك الموثق بالتواريخ */}
+                          <button
+                            type="button"
+                            onClick={() => setSelectedLedgerSub(sub)}
+                            className="flex items-center justify-center gap-1 bg-slate-950 hover:bg-slate-800 text-amber-400 border border-amber-500/30 font-bold py-2 px-1 rounded-xl transition cursor-pointer"
+                            title="سجل حركات التسديد الموثقة بالتواريخ"
+                          >
+                            <History className="w-3.5 h-3.5" />
+                            <span>السجل</span>
+                          </button>
+
                           {/* زر تذكير واتساب بالدين */}
                           <button
+                            type="button"
                             onClick={() => handleSendDebtReminder(sub)}
-                            className="flex items-center justify-center gap-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-bold py-2 px-2 rounded-xl transition-all cursor-pointer"
+                            className="flex items-center justify-center gap-1 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-bold py-2 px-1 rounded-xl transition cursor-pointer"
                             title="إرسال رسالة تذكير بالدين للمشترك عبر واتساب"
                           >
                             <MessageSquare className="w-3.5 h-3.5" />
-                            <span>تذكير واتساب</span>
+                            <span>واتساب</span>
                           </button>
 
                           {/* زر قبض جزئي أو مخصص */}
                           <button
+                            type="button"
                             onClick={() => openPaymentModal(sub)}
-                            className="flex items-center justify-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 font-bold py-2 px-2 rounded-xl transition-all cursor-pointer"
+                            className="flex items-center justify-center gap-1 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 font-bold py-2 px-1 rounded-xl transition cursor-pointer"
                             title="دفع مبلغ جزئي أو مخصص"
                           >
                             <DollarSign className="w-3.5 h-3.5" />
-                            <span>دفع جزئي</span>
+                            <span>جزئي</span>
                           </button>
                         </div>
                       </>
@@ -1169,6 +1215,17 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
           subscriber={lastPaymentReceipt.subscriber}
           payment={lastPaymentReceipt.payment}
           remainingDebt={lastPaymentReceipt.remaining}
+          settings={settings}
+        />
+      )}
+
+      {/* نافذة سجل تسديدات المشترك الموثق بالتواريخ والأوقات */}
+      {selectedLedgerSub && (
+        <SubscriberPaymentLedgerModal
+          subscriber={selectedLedgerSub}
+          onClose={() => setSelectedLedgerSub(null)}
+          payments={payments.filter((p) => p.subscriberId === selectedLedgerSub.id)}
+          invoices={invoices.filter((inv) => inv.subscriberId === selectedLedgerSub.id)}
           settings={settings}
         />
       )}

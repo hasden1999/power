@@ -214,5 +214,38 @@ body.sunlight-mode .border-slate-700\/60 {
   border-color: #e2e8f0 !important;
 }
 
+/* دعم وضع النهار للوحة القيادة الذكية وجدار الديون والعدادات */
+body.sunlight-mode .from-rose-950\/40,
+body.sunlight-mode .from-emerald-950\/40,
+body.sunlight-mode .from-amber-950\/30,
+body.sunlight-mode .from-cyan-950\/30 {
+  --tw-gradient-from: #ffffff !important;
+}
+
+body.sunlight-mode .bg-rose-950\/40 {
+  background-color: #ffe4e6 !important;
+  color: #9f1239 !important;
+}
+
+body.sunlight-mode .bg-emerald-950\/40 {
+  background-color: #dcfce7 !important;
+  color: #166534 !important;
+}
+
+body.sunlight-mode .text-rose-400,
+body.sunlight-mode .text-rose-300 {
+  color: #e11d48 !important;
+}
+
+body.sunlight-mode .text-emerald-400,
+body.sunlight-mode .text-emerald-300 {
+  color: #15803d !important;
+}
+
+body.sunlight-mode .text-cyan-400,
+body.sunlight-mode .text-cyan-300 {
+  color: #0e7490 !important;
+}
+
 
 
