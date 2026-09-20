@@ -36,7 +36,7 @@ export const Navbar: FC<NavbarProps> = ({
   onToggleUiMode: _onToggleUiMode,
 }) => {
   return (
-    <header className="bg-slate-950/90 backdrop-blur-md border-b border-slate-800 sticky top-0 z-40">
+    <header className="bg-[#071330]/90 backdrop-blur-xl border-b border-blue-900/50 sticky top-0 z-40">
       
       {/* شريط تنبيه إذا كان السوبر أدمن يعاين مولدة كدعم فني */}
       {isImpersonating && (
@@ -78,13 +78,13 @@ export const Navbar: FC<NavbarProps> = ({
         </div>
 
         {/* أزرار التنقل بين الشاشات (تظهر للشاشات الكبيرة، بينما تعتمد الهواتف على الشريط السفلي) */}
-        <nav className="hidden md:flex items-center bg-slate-900/90 p-1 rounded-xl border border-slate-800 w-full md:w-auto justify-around sm:justify-start gap-1 overflow-x-auto">
+        <nav className="hidden md:flex items-center bg-[#0c1c44]/90 p-1 rounded-xl border border-blue-800/50 w-full md:w-auto justify-around sm:justify-start gap-1 overflow-x-auto">
           <button
             onClick={() => setCurrentTab('collection')}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition-all whitespace-nowrap ${
               currentTab === 'collection'
-                ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20 font-bold'
-                : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
+                ? 'bg-blue-600 text-white shadow-md shadow-blue-500/30 font-bold'
+                : 'text-blue-200/80 hover:text-white hover:bg-blue-800/40'
             }`}
           >
             <DollarSign className="w-4 h-4" />
@@ -95,8 +95,8 @@ export const Navbar: FC<NavbarProps> = ({
             onClick={() => setCurrentTab('subscribers')}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition-all whitespace-nowrap ${
               currentTab === 'subscribers'
-                ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20 font-bold'
-                : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
+                ? 'bg-blue-600 text-white shadow-md shadow-blue-500/30 font-bold'
+                : 'text-blue-200/80 hover:text-white hover:bg-blue-800/40'
             }`}
           >
             <Users className="w-4 h-4" />
@@ -108,8 +108,8 @@ export const Navbar: FC<NavbarProps> = ({
               onClick={() => setCurrentTab('pricing')}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition-all whitespace-nowrap ${
                 currentTab === 'pricing'
-                  ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20 font-bold'
-                  : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
+                  ? 'bg-blue-600 text-white shadow-md shadow-blue-500/30 font-bold'
+                  : 'text-blue-200/80 hover:text-white hover:bg-blue-800/40'
               }`}
             >
               <Calendar className="w-4 h-4" />
@@ -122,8 +122,8 @@ export const Navbar: FC<NavbarProps> = ({
               onClick={() => setCurrentTab('expenses')}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition-all whitespace-nowrap ${
                 currentTab === 'expenses'
-                  ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20 font-bold'
-                : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
+                  ? 'bg-blue-600 text-white shadow-md shadow-blue-500/30 font-bold'
+                  : 'text-blue-200/80 hover:text-white hover:bg-blue-800/40'
               }`}
             >
               <TrendingDown className="w-4 h-4" />
@@ -136,8 +136,8 @@ export const Navbar: FC<NavbarProps> = ({
               onClick={() => setCurrentTab('saas')}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition-all whitespace-nowrap ${
                 currentTab === 'saas'
-                  ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20 font-bold'
-                  : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
+                  ? 'bg-blue-600 text-white shadow-md shadow-blue-500/30 font-bold'
+                  : 'text-blue-200/80 hover:text-white hover:bg-blue-800/40'
               }`}
             >
               <Settings className="w-4 h-4" />
@@ -158,7 +158,7 @@ export const Navbar: FC<NavbarProps> = ({
               className={`flex items-center gap-1 px-2.5 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                 isSunlightMode
                   ? 'bg-amber-500 text-slate-950 font-black shadow-md shadow-amber-500/30'
-                  : 'bg-slate-900 hover:bg-slate-800 text-amber-300 border border-slate-800'
+                  : 'bg-[#0c1c44] hover:bg-[#122659] text-amber-300 border border-blue-800/60'
               }`}
               title={isSunlightMode ? 'العودة للوضع الليلي' : 'تفعيل وضع النهار عالي التباين للشمس المباشرة'}
             >
@@ -172,10 +172,10 @@ export const Navbar: FC<NavbarProps> = ({
           )}
 
           {/* زر تسجيل الخروج فقط */}
-          <div className="flex items-center gap-1.5 border-r border-slate-800 pr-2">
+          <div className="flex items-center gap-1.5 border-r border-blue-800/60 pr-2">
             <button
               onClick={onLogout}
-              className="flex items-center gap-1 bg-slate-900 hover:bg-slate-800 text-rose-400 border border-slate-800 p-1.5 sm:px-2.5 sm:py-1 rounded-xl text-xs font-bold transition-all cursor-pointer"
+              className="flex items-center gap-1 bg-[#0c1c44] hover:bg-[#122659] text-rose-400 border border-blue-800/60 p-1.5 sm:px-2.5 sm:py-1 rounded-xl text-xs font-bold transition-all cursor-pointer"
               title="تسجيل الخروج"
             >
               <LogOut className="w-3.5 h-3.5" />
@@ -212,7 +212,7 @@ const SyncBadge: FC<{ syncInfo: SyncStatusInfo }> = ({ syncInfo }) => {
             ? 'bg-amber-500/20 border border-amber-500/40 text-amber-300'
             : syncInfo.pendingCount > 0
             ? 'bg-amber-500/10 border border-amber-500/30 text-amber-400 hover:bg-amber-500/20'
-            : 'bg-slate-900/80 border border-slate-800 text-slate-300 hover:text-emerald-400 hover:bg-slate-800'
+            : 'bg-[#0c1c44]/90 border border-blue-800/50 text-blue-200 hover:text-emerald-400 hover:bg-[#122659]'
         }`}
         title="مزامنة سحابية لحظية مع خادم Supabase"
       >

@@ -11,13 +11,26 @@
   }
 }
 
+/* تصميم الأزرق الملكي الحيوي (Royal Cobalt Design System - Model 1) */
+body {
+  background: radial-gradient(circle at 50% -15%, #1d4ed8 0%, #1e3a8a 30%, #0f172a 75%, #020617 100%) !important;
+  background-attachment: fixed !important;
+  min-height: 100vh;
+}
+
+.royal-cobalt-bg {
+  background: radial-gradient(circle at 50% -15%, rgba(29, 78, 216, 0.45) 0%, rgba(30, 58, 138, 0.3) 35%, rgba(15, 23, 42, 0.95) 100%),
+              linear-gradient(180deg, #172554 0%, #0f172a 45%, #020617 100%);
+  background-attachment: fixed;
+}
+
 /* سمات وضع النهار فائق التباين (Sunlight High Contrast Mode) */
 html.sunlight-mode {
   color-scheme: light;
 }
 
 html.sunlight-mode body {
-  background-color: #f1f5f9 !important;
+  background: #f1f5f9 !important;
   color: #0f172a !important;
 }
 

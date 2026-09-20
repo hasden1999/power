@@ -627,15 +627,15 @@ export const SubscribersScreen: FC<SubscribersScreenProps> = ({ tenantId, curren
     <div className="space-y-4 pb-12">
       
       {/* شريط الإجراءات العلوي */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-slate-900/80 border border-slate-800 rounded-2xl p-3 sm:p-4 shadow-lg">
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-[#0a183d]/85 border border-blue-800/60 rounded-2xl p-3 sm:p-4 shadow-xl backdrop-blur-md">
         <div>
           <h2 className="text-lg font-bold text-white flex items-center gap-2">
             <span>سجل المشتركين والقواطع</span>
-            <span className="text-xs font-semibold bg-slate-800 text-amber-400 px-2.5 py-0.5 rounded-full border border-slate-700">
+            <span className="text-xs font-semibold bg-blue-900/60 text-cyan-300 px-2.5 py-0.5 rounded-full border border-blue-700/60">
               {subscribers.length} مشترك
             </span>
           </h2>
-          <p className="text-xs text-slate-400 mt-0.5">
+          <p className="text-xs text-blue-200/70 mt-0.5">
             إدارة المشتركين، أرقام الفيز والقواطع، وتخصيص الأمبيرات ونوع الخط
           </p>
         </div>
@@ -644,7 +644,7 @@ export const SubscribersScreen: FC<SubscribersScreenProps> = ({ tenantId, curren
         <div className="flex items-center gap-2 flex-wrap">
           <button
             onClick={handleExportCSV}
-            className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer border border-slate-700"
+            className="flex items-center gap-1.5 bg-[#0c1c44] hover:bg-[#122659] text-blue-200 px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer border border-blue-800/60"
             title="تصدير كشف المشتركين إلى ملف Excel"
           >
             <Download className="w-4 h-4 text-emerald-400" />
@@ -657,16 +657,16 @@ export const SubscribersScreen: FC<SubscribersScreenProps> = ({ tenantId, curren
               setImportError(null);
               setIsImportModalOpen(true);
             }}
-            className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer border border-slate-700"
+            className="flex items-center gap-1.5 bg-[#0c1c44] hover:bg-[#122659] text-blue-200 px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer border border-blue-800/60"
             title="استيراد مشتركين من ملف Excel / CSV"
           >
-            <Upload className="w-4 h-4 text-blue-400" />
+            <Upload className="w-4 h-4 text-cyan-400" />
             <span className="hidden sm:inline">استيراد إكسل</span>
           </button>
 
           <button
             onClick={handleOpenAdd}
-            className="flex-1 sm:flex-initial flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black py-2.5 px-4 rounded-xl shadow-lg shadow-amber-500/20 text-xs sm:text-sm transition-all cursor-pointer active:scale-95"
+            className="flex-1 sm:flex-initial flex items-center justify-center gap-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-black py-2.5 px-4 rounded-xl shadow-lg shadow-blue-600/30 text-xs sm:text-sm transition-all cursor-pointer active:scale-95"
           >
             <Plus className="w-4 h-4 stroke-[3]" />
             <span>إضافة مشترك جديد</span>
@@ -675,20 +675,20 @@ export const SubscribersScreen: FC<SubscribersScreenProps> = ({ tenantId, curren
       </div>
 
       {/* شريط البحث الميداني البارز والمخصص للهواتف المحمولة */}
-      <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3 space-y-2.5 shadow-md">
+      <div className="bg-[#0a183d]/85 border border-blue-800/60 rounded-2xl p-3 space-y-2.5 shadow-xl backdrop-blur-md">
         <div className="relative flex items-center">
-          <Search className="absolute right-3.5 w-5 h-5 text-amber-400 pointer-events-none" />
+          <Search className="absolute right-3.5 w-5 h-5 text-cyan-400 pointer-events-none" />
           <input
             type="text"
             placeholder="🔍 ابحث بالاسم، رقم القاطع، الهاتف، أو الشارع..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full bg-slate-950 border border-slate-700/80 focus:border-amber-500 rounded-xl pr-11 pl-10 py-3 text-sm text-white placeholder-slate-400 focus:outline-none transition-all shadow-inner"
+            className="w-full bg-[#06122c]/90 border border-blue-700/60 focus:border-cyan-400 rounded-xl pr-11 pl-10 py-3 text-sm text-white placeholder-blue-300/50 focus:outline-none transition-all shadow-inner"
           />
           {searchTerm && (
             <button
               onClick={() => setSearchTerm('')}
-              className="absolute left-3 p-1 text-slate-400 hover:text-white bg-slate-800 rounded-lg transition-colors cursor-pointer"
+              className="absolute left-3 p-1 text-blue-300 hover:text-white bg-[#0c1c44] rounded-lg transition-colors cursor-pointer border border-blue-800/60"
               title="مسح البحث"
             >
               <X className="w-4 h-4" />
@@ -697,8 +697,8 @@ export const SubscribersScreen: FC<SubscribersScreenProps> = ({ tenantId, curren
         </div>
 
         {/* مؤشر عدد النتائج وأزرار الأزقة */}
-        <div className="flex items-center justify-between gap-2 text-xs text-slate-400 flex-wrap">
-          <span className="font-semibold text-slate-300">
+        <div className="flex items-center justify-between gap-2 text-xs text-blue-200/70 flex-wrap">
+          <span className="font-semibold text-blue-200">
             عرض {filteredSubscribers.length} من أصل {subscribers.length} مشترك
           </span>
 
@@ -708,8 +708,8 @@ export const SubscribersScreen: FC<SubscribersScreenProps> = ({ tenantId, curren
                 onClick={() => setSelectedStreet('all')}
                 className={`px-3 py-1.5 rounded-xl transition-all whitespace-nowrap cursor-pointer font-bold ${
                   selectedStreet === 'all'
-                    ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
-                    : 'bg-slate-950 text-slate-400 border border-slate-800 hover:text-white'
+                    ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30 font-bold'
+                    : 'bg-[#06122c]/80 text-blue-300/80 border border-blue-800/60 hover:text-white hover:bg-blue-900/50'
                 }`}
               >
                 كل الأزقة ({subscribers.length})
@@ -720,8 +720,8 @@ export const SubscribersScreen: FC<SubscribersScreenProps> = ({ tenantId, curren
                   onClick={() => setSelectedStreet(st)}
                   className={`px-3 py-1.5 rounded-xl transition-all whitespace-nowrap ${
                     selectedStreet === st
-                      ? 'bg-amber-500 text-slate-950 font-bold'
-                      : 'bg-slate-900 text-slate-400 border border-slate-700'
+                      ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30 font-bold'
+                      : 'bg-[#06122c]/80 text-blue-300/80 border border-blue-800/60 hover:text-white hover:bg-blue-900/50'
                   }`}
                 >
                   {st}
@@ -733,7 +733,7 @@ export const SubscribersScreen: FC<SubscribersScreenProps> = ({ tenantId, curren
       </div>
 
       {/* قائمة المشتركين */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
         {filteredSubscribers.map((sub) => {
           const typeLabel =
             sub.subscriptionType === 'gold'
@@ -747,8 +747,8 @@ export const SubscribersScreen: FC<SubscribersScreenProps> = ({ tenantId, curren
           return (
             <div
               key={sub.id}
-              className={`bg-slate-800/90 border rounded-2xl p-4 flex flex-col justify-between gap-3 shadow-md transition-all ${
-                sub.isActive ? 'border-slate-700' : 'border-slate-800 opacity-60'
+              className={`bg-[#0a183d]/80 hover:bg-[#0d1f4d]/90 border rounded-2xl p-4 flex flex-col justify-between gap-3 shadow-lg shadow-blue-950/40 transition-all hover:border-blue-600/60 ${
+                sub.isActive ? 'border-blue-800/50' : 'border-blue-900/40 opacity-60'
               }`}
             >
               <div>
@@ -763,20 +763,20 @@ export const SubscribersScreen: FC<SubscribersScreenProps> = ({ tenantId, curren
                         </span>
                       )}
                     </h4>
-                    <p className="text-xs text-slate-400 mt-1">📍 {sub.street}</p>
+                    <p className="text-xs text-blue-200/70 mt-1">📍 {sub.street}</p>
                     {sub.phone && (
-                      <p className="text-xs text-slate-400 flex items-center gap-1 mt-0.5">
+                      <p className="text-xs text-blue-200/70 flex items-center gap-1 mt-0.5">
                         <Phone className="w-3 h-3 text-emerald-400" />
                         <span>{sub.phone}</span>
                       </p>
                     )}
                   </div>
 
-                  <div className="text-left bg-slate-900 border border-slate-700 px-2.5 py-1.5 rounded-xl">
-                    <span className="text-xs font-black text-amber-400 block">
+                  <div className="text-left bg-[#06122c] border border-blue-700/60 px-2.5 py-1.5 rounded-xl">
+                    <span className="text-xs font-black text-cyan-300 block">
                       {sub.breakerNumber}
                     </span>
-                    <span className="text-[11px] text-slate-300 font-bold">
+                    <span className="text-[11px] text-blue-200 font-bold">
                       {sub.amperes} أمبير
                     </span>
                   </div>
@@ -794,14 +794,14 @@ export const SubscribersScreen: FC<SubscribersScreenProps> = ({ tenantId, curren
                     : 0;
 
                   return (
-                    <div className="mt-3 pt-2.5 border-t border-slate-700/60 flex items-center justify-between text-xs text-slate-300">
+                    <div className="mt-3 pt-2.5 border-t border-blue-800/60 flex items-center justify-between text-xs text-blue-200">
                       <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="bg-slate-900/80 px-2 py-0.5 rounded text-[11px] text-slate-400">
+                        <span className="bg-[#06122c]/90 px-2 py-0.5 rounded text-[11px] text-blue-300 border border-blue-900/60">
                           {typeLabel}
                         </span>
                         {currentCost > 0 && (
-                          <span className="text-amber-400 font-bold bg-amber-500/10 border border-amber-500/25 px-2 py-0.5 rounded text-[11px] flex items-center gap-1">
-                            <Zap className="w-3 h-3 text-amber-400 fill-amber-400" />
+                          <span className="text-cyan-300 font-bold bg-blue-600/20 border border-blue-400/30 px-2 py-0.5 rounded text-[11px] flex items-center gap-1">
+                            <Zap className="w-3 h-3 text-cyan-400 fill-cyan-400" />
                             <span>اشتراك الشهر: {formatIQD(currentCost)}</span>
                           </span>
                         )}
@@ -816,19 +816,19 @@ export const SubscribersScreen: FC<SubscribersScreenProps> = ({ tenantId, curren
                 })()}
 
                 {sub.notes && (
-                  <p className="text-xs text-slate-500 mt-2 bg-slate-950/40 p-1.5 rounded">
+                  <p className="text-xs text-blue-300/70 mt-2 bg-[#06122c]/60 p-1.5 rounded border border-blue-900/40">
                     ملاحظة: {sub.notes}
                   </p>
                 )}
               </div>
 
               {/* أزرار العمليات على المشترك */}
-              <div className="pt-2 border-t border-slate-700/60 flex items-center justify-between gap-1 text-xs">
+              <div className="pt-2 border-t border-blue-800/60 flex items-center justify-between gap-1 text-xs">
                 
                 {/* كشف الحساب */}
                 <button
                   onClick={() => setStatementSub(sub)}
-                  className="flex items-center gap-1 text-amber-400 hover:text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 px-2.5 py-1.5 rounded-lg font-medium transition-colors"
+                  className="flex items-center gap-1 text-cyan-300 hover:text-cyan-200 bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/30 px-2.5 py-1.5 rounded-lg font-medium transition-colors cursor-pointer"
                   title="كشف حساب وسجل الدفعات"
                 >
                   <History className="w-3.5 h-3.5" />
@@ -839,10 +839,10 @@ export const SubscribersScreen: FC<SubscribersScreenProps> = ({ tenantId, curren
                   {/* تفعيل / إيقاف */}
                   <button
                     onClick={() => handleToggleActive(sub)}
-                    className={`p-1.5 rounded-lg border transition-colors ${
+                    className={`p-1.5 rounded-lg border transition-colors cursor-pointer ${
                       sub.isActive
                         ? 'text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10'
-                        : 'text-slate-400 border-slate-700 hover:bg-slate-700'
+                        : 'text-slate-400 border-blue-900/60 hover:bg-blue-900/40'
                     }`}
                     title={sub.isActive ? 'إيقاف الخط مؤقتاً' : 'إعادة تفعيل الخط'}
                   >
@@ -852,7 +852,7 @@ export const SubscribersScreen: FC<SubscribersScreenProps> = ({ tenantId, curren
                   {/* تعديل */}
                   <button
                     onClick={() => handleOpenEdit(sub)}
-                    className="p-1.5 rounded-lg border border-slate-700 text-slate-300 hover:text-white hover:bg-slate-700 transition-colors"
+                    className="p-1.5 rounded-lg border border-blue-800/60 text-blue-200 hover:text-white hover:bg-blue-800/40 transition-colors cursor-pointer"
                     title="تعديل بيانات المشترك"
                   >
                     <Edit2 className="w-4 h-4" />
@@ -862,7 +862,7 @@ export const SubscribersScreen: FC<SubscribersScreenProps> = ({ tenantId, curren
                   {currentUser?.role !== 'collector' && (
                     <button
                       onClick={() => handleDeleteSubscriber(sub)}
-                      className="p-1.5 rounded-lg border border-rose-500/30 text-rose-400 hover:bg-rose-500/20 transition-colors"
+                      className="p-1.5 rounded-lg border border-rose-500/30 text-rose-400 hover:bg-rose-500/20 transition-colors cursor-pointer"
                       title="حذف المشترك نهائياً"
                     >
                       <Trash2 className="w-4 h-4" />

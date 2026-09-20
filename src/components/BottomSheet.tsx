@@ -38,7 +38,7 @@ export const BottomSheet: FC<BottomSheetProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/80 backdrop-blur-sm transition-opacity animate-fade-in">
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-[#040a1b]/80 backdrop-blur-md transition-opacity animate-fade-in">
       {/* خلفية قابلة للضغط للإغلاق السريع */}
       <div className="fixed inset-0" onClick={onClose} aria-hidden="true" />
 
@@ -46,18 +46,18 @@ export const BottomSheet: FC<BottomSheetProps> = ({
       <div
         role="dialog"
         aria-modal="true"
-        className={`relative z-10 w-full max-w-lg bg-slate-900 border-t border-x border-slate-800 rounded-t-3xl shadow-2xl flex flex-col ${maxHeight} transition-transform transform translate-y-0 duration-300 ease-out`}
+        className={`relative z-10 w-full max-w-lg bg-[#09173d] border-t border-x border-blue-800/60 rounded-t-3xl shadow-2xl flex flex-col ${maxHeight} transition-transform transform translate-y-0 duration-300 ease-out`}
       >
         {/* مقبض السحب المرئي (Drag Handle) */}
         <div className="pt-3 pb-1 flex justify-center cursor-pointer" onClick={onClose}>
-          <div className="w-12 h-1.5 rounded-full bg-slate-700 hover:bg-slate-600 transition-colors" />
+          <div className="w-12 h-1.5 rounded-full bg-blue-700/60 hover:bg-blue-600 transition-colors" />
         </div>
 
         {/* رأس الصفيحة */}
-        <div className="px-4 py-3 border-b border-slate-800/80 flex items-center justify-between gap-3">
+        <div className="px-4 py-3 border-b border-blue-900/60 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2.5 min-w-0">
             {icon && (
-              <div className="w-8 h-8 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 flex-shrink-0">
+              <div className="w-8 h-8 rounded-xl bg-blue-600/20 border border-blue-500/40 flex items-center justify-center text-cyan-400 flex-shrink-0">
                 {icon}
               </div>
             )}
@@ -66,7 +66,7 @@ export const BottomSheet: FC<BottomSheetProps> = ({
                 {title}
               </h3>
               {subtitle && (
-                <p className="text-xs text-slate-400 truncate mt-0.5">
+                <p className="text-xs text-blue-200/70 truncate mt-0.5">
                   {subtitle}
                 </p>
               )}
@@ -76,7 +76,7 @@ export const BottomSheet: FC<BottomSheetProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="w-8 h-8 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition-all cursor-pointer flex-shrink-0"
+            className="w-8 h-8 rounded-xl bg-blue-950/80 hover:bg-blue-900 text-blue-300 hover:text-white border border-blue-800/50 flex items-center justify-center transition-all cursor-pointer flex-shrink-0"
             aria-label="إغلاق النافذة"
           >
             <X className="w-4 h-4" />

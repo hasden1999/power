@@ -623,9 +623,9 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
     <div className="space-y-2.5 pb-12">
       
       {/* 1. حقل البحث عن المشترك مع الاحتمالات والاقتراحات اللحظية فور كتابة أي حرف */}
-      <div className="relative bg-slate-900/90 border border-slate-800 rounded-2xl p-2.5 sm:p-3 shadow-lg z-30">
+      <div className="relative bg-slate-900/80 backdrop-blur-xl border border-blue-400/30 rounded-2xl p-2.5 sm:p-3 shadow-xl shadow-blue-950/30 z-30">
         <div className="relative flex items-center">
-          <Search className="absolute right-3.5 w-5 h-5 text-amber-400 pointer-events-none" />
+          <Search className="absolute right-3.5 w-5 h-5 text-blue-400 pointer-events-none" />
           <input
             type="text"
             placeholder="🔍 اكتب أي حرف للبحث بالاسم، رقم القاطع، الهاتف، أو الزقاق..."
@@ -635,7 +635,7 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
               setSearchTerm(e.target.value);
               setIsSuggestionsOpen(true);
             }}
-            className="w-full bg-slate-950 border border-slate-700 focus:border-amber-500 rounded-xl pr-11 pl-10 py-2.5 sm:py-3 text-sm text-white placeholder-slate-400 focus:outline-none transition-all shadow-inner font-bold"
+            className="w-full bg-slate-950/90 border border-blue-500/40 focus:border-blue-400 rounded-xl pr-11 pl-10 py-2.5 sm:py-3 text-sm text-white placeholder-blue-200/50 focus:outline-none transition-all shadow-inner font-bold focus:ring-2 focus:ring-blue-400/30"
           />
           {searchTerm && (
             <button
@@ -1036,10 +1036,10 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
                         <button
                           onClick={() => handleQuickFullPayment(sub)}
                           disabled={isSubmitting}
-                          className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-black text-xs shadow-sm transition cursor-pointer flex items-center gap-1"
+                          className="px-3.5 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 active:scale-95 text-white font-black text-xs shadow-md shadow-emerald-600/30 transition cursor-pointer flex items-center gap-1"
                           title="قبض كامل بلمسة واحدة"
                         >
-                          <Zap className="w-3.5 h-3.5 fill-slate-950" />
+                          <Zap className="w-3.5 h-3.5 fill-white" />
                           <span>قبض</span>
                         </button>
                         <button
@@ -1081,12 +1081,12 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
               return (
                 <div
                   key={sub.id}
-                  className={`bg-slate-900/90 border rounded-3xl p-4 transition-all duration-200 flex flex-col justify-between gap-3.5 shadow-md hover:border-slate-600 ${
+                  className={`bg-slate-900/85 backdrop-blur-md border rounded-3xl p-4 transition-all duration-200 flex flex-col justify-between gap-3.5 shadow-xl shadow-slate-950/40 hover:border-blue-400/60 ${
                     isPaid
                       ? 'border-emerald-500/30 hover:border-emerald-500/60'
                       : isPartial
                       ? 'border-amber-500/40 hover:border-amber-500/70'
-                      : 'border-slate-800 hover:border-slate-700'
+                      : 'border-slate-800 hover:border-blue-400/50'
                   }`}
                 >
                   {/* الرأس: الاسم ورقم القاطع */}
@@ -1123,12 +1123,12 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
                       </p>
                     </div>
 
-                    {/* وسم رقم القاطع والأمبيرات */}
-                    <div className="text-left bg-slate-950 px-3 py-1.5 rounded-2xl border border-slate-800 flex-shrink-0">
-                      <div className="text-xs font-black text-amber-400 tracking-wider">
+                    {/* وسم رقم القاطع والأمبيرات في تصميم الأزرق الملكي */}
+                    <div className="text-left bg-blue-600/25 border border-blue-500/40 px-3 py-1.5 rounded-2xl flex-shrink-0 shadow-sm">
+                      <div className="text-xs font-black text-blue-300 tracking-wider">
                         {sub.breakerNumber || 'قاطع'}
                       </div>
-                      <div className="text-[11px] text-slate-300 font-bold">
+                      <div className="text-[11px] text-white font-bold">
                         {sub.amperes} أمبير
                       </div>
                     </div>
@@ -1191,14 +1191,14 @@ export const CollectionScreen: FC<CollectionScreenProps> = ({
                       </div>
                     ) : (
                       <>
-                        {/* زر القبض الكامل الفوري بلمسة واحدة */}
+                        {/* زر القبض الكامل الفوري بلمسة واحدة - أخضر زمردي بارز */}
                         <button
                           onClick={() => handleQuickFullPayment(sub)}
                           disabled={isSubmitting}
-                          className="w-full flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-black py-2.5 px-3 rounded-2xl shadow-lg shadow-amber-500/20 text-xs sm:text-sm transition-all cursor-pointer"
+                          className="w-full flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-400 active:scale-95 text-white font-black py-2.5 px-3 rounded-2xl shadow-lg shadow-emerald-600/30 text-xs sm:text-sm transition-all cursor-pointer"
                           title="قبض المبلغ المتبقي كاملاً فوراً"
                         >
-                          <Zap className="w-4 h-4 fill-slate-950 stroke-[2.5]" />
+                          <Zap className="w-4 h-4 fill-white stroke-[2.5]" />
                           <span>⚡ قبض كامل ({formatIQD(remaining)})</span>
                         </button>
 

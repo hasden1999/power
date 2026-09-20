@@ -254,7 +254,7 @@ export function App() {
   const tenantId = activeSettings?.id || 'tenant-01';
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-amber-500 selection:text-slate-950">
+    <div className="min-h-screen royal-cobalt-bg text-slate-100 flex flex-col font-sans selection:bg-blue-500 selection:text-white">
       
       {/* شريط تحديث المنظومة غير المتطفل عند توفر إصدار أحدث */}
       {updateAvailable && (
