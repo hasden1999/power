@@ -9,7 +9,8 @@ import {
   calculateUnitPrice,
   syncSubscriberInvoiceForCurrentCycle,
   syncAllMissingInvoices,
-  getLatestActiveCycle
+  getLatestActiveCycle,
+  normalizeArabic
 } from '../services/billingService';
 import { logAuditAction } from '../services/auditService';
 import { SubscriberPaymentLedgerModal } from './SubscriberPaymentLedgerModal';
@@ -153,16 +154,33 @@ export const SubscribersScreen: FC<SubscribersScreenProps> = ({ tenantId, curren
     return Array.from(streets);
   }, [subscribers]);
 
-  // فلترة المشتركين
+  // فلترة المشتركين بالمعايرة اللغوية العربية الدقيقة
   const filteredSubscribers = useMemo(() => {
+    const term = searchTerm.trim();
+    if (!term && selectedStreet === 'all') {
+      return subscribers;
+    }
+
+    const normTerm = normalizeArabic(term);
+    const cleanDigits = term.replace(/[^0-9]/g, '');
+
     return subscribers.filter((sub) => {
-      const term = searchTerm.trim().toLowerCase();
-      const matchesSearch =
-        !term ||
-        sub.fullName.toLowerCase().includes(term) ||
-        sub.phone.includes(term) ||
-        sub.breakerNumber.toLowerCase().includes(term) ||
-        sub.street.toLowerCase().includes(term);
+      let matchesSearch = true;
+
+      if (term) {
+        const normName = normalizeArabic(sub.fullName || '');
+        const normStreet = normalizeArabic(sub.street || '');
+        const cleanPhone = (sub.phone || '').replace(/[^0-9]/g, '');
+        const rawBreaker = (sub.breakerNumber || '').toLowerCase();
+        const rawPhone = sub.phone || '';
+
+        matchesSearch =
+          normName.includes(normTerm) ||
+          (cleanDigits.length > 0 && cleanPhone.includes(cleanDigits)) ||
+          rawPhone.includes(term) ||
+          rawBreaker.includes(term.toLowerCase()) ||
+          normStreet.includes(normTerm);
+      }
 
       const matchesStreet = selectedStreet === 'all' || sub.street === selectedStreet;
 
