@@ -1,4 +1,30 @@
+/* Local Offline Fonts (Zero-CDN Architecture) */
+@font-face {
+  font-family: 'Cairo';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('/fonts/cairo-arabic.woff2') format('woff2');
+  unicode-range: U+0600-06FF, U+0750-077F, U+0870-088E, U+0890-0891, U+0897-08E1, U+08E3-08FF, U+200C-200E, U+2010-2011, U+204F, U+2E41, U+FB50-FDFF, U+FE70-FE74, U+FE76-FEFC;
+}
+
+@font-face {
+  font-family: 'Cairo';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('/fonts/cairo-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
 @import "tailwindcss";
+
+:root {
+  --color-primary: #0E7490;
+  --color-primary-dark: #155e75;
+  --color-primary-light: #06b6d4;
+  --color-bg-dark: #0f172a;
+}
 
 @layer base {
   * {
@@ -11,16 +37,16 @@
   }
 }
 
-/* تصميم الأزرق الملكي الحيوي (Royal Cobalt Design System - Model 1) */
+/* تصميم الأزرق الملكي والتيل الحيوي (Ampereji Design System) */
 body {
-  background: radial-gradient(circle at 50% -15%, #1d4ed8 0%, #1e3a8a 30%, #0f172a 75%, #020617 100%) !important;
+  background: radial-gradient(circle at 50% -15%, #0e7490 0%, #155e75 25%, #0f172a 75%, #020617 100%) !important;
   background-attachment: fixed !important;
   min-height: 100vh;
 }
 
 .royal-cobalt-bg {
-  background: radial-gradient(circle at 50% -15%, rgba(29, 78, 216, 0.45) 0%, rgba(30, 58, 138, 0.3) 35%, rgba(15, 23, 42, 0.95) 100%),
-              linear-gradient(180deg, #172554 0%, #0f172a 45%, #020617 100%);
+  background: radial-gradient(circle at 50% -15%, rgba(14, 116, 144, 0.45) 0%, rgba(21, 94, 117, 0.3) 35%, rgba(15, 23, 42, 0.95) 100%),
+              linear-gradient(180deg, #164e63 0%, #0f172a 45%, #020617 100%);
   background-attachment: fixed;
 }
 
@@ -157,10 +183,7 @@ html.sunlight-mode .fintech-card-shadow {
   scrollbar-width: none;
 }
 
-/* ==========================================================================
-   وضع النهار عالي التباين للشمس المباشرة (Sunlight High-Contrast Mode)
-   مصمم خصيصاً للجباية الميدانية تحت أشعة شمس الصيف لتسهيل القراءة وتفادي الانعكاس
-   ========================================================================== */
+/* وضع النهار عالي التباين للشمس المباشرة */
 body.sunlight-mode {
   background-color: #f1f5f9 !important;
   color: #0f172a !important;
@@ -227,7 +250,6 @@ body.sunlight-mode .border-slate-700\/60 {
   border-color: #e2e8f0 !important;
 }
 
-/* دعم وضع النهار للوحة القيادة الذكية وجدار الديون والعدادات */
 body.sunlight-mode .from-rose-950\/40,
 body.sunlight-mode .from-emerald-950\/40,
 body.sunlight-mode .from-amber-950\/30,
@@ -259,6 +281,3 @@ body.sunlight-mode .text-cyan-400,
 body.sunlight-mode .text-cyan-300 {
   color: #0e7490 !important;
 }
-
-
-

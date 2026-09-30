@@ -1,0 +1,47 @@
+# Nginx Configuration Example for Ampereji PWA
+server {
+    listen 443 ssl http2;
+    server_name ampereji.example.com;
+
+    root /var/www/ampereji/dist;
+    index index.html;
+
+    # SSL Certificates (Required for PWA & OPFS)
+    ssl_certificate /etc/letsencrypt/live/ampereji.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/ampereji.example.com/privkey.pem;
+
+    # Isolation Headers for SQLite WASM OPFS (SharedArrayBuffer)
+    add_header Cross-Origin-Opener-Policy "same-origin" always;
+    add_header Cross-Origin-Embedder-Policy "require-corp" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+
+    # Service Worker & HTML: Never Cache
+    location ~* (sw\.js|registerSW\.js|index\.html|manifest\.webmanifest)$ {
+        add_header Cache-Control "no-cache, no-store, must-revalidate";
+        add_header Cross-Origin-Opener-Policy "same-origin" always;
+        add_header Cross-Origin-Embedder-Policy "require-corp" always;
+        try_files $uri =404;
+    }
+
+    # Static Assets & WASM: Long Immutable Cache
+    location ~* \.(js|css|png|jpg|jpeg|gif|svg|ico|woff2)$ {
+        expires 1y;
+        add_header Cache-Control "public, max-age=31536000, immutable";
+        access_log off;
+    }
+
+    location ~* \.wasm$ {
+        types {
+            application/wasm wasm;
+        }
+        expires 1y;
+        add_header Cache-Control "public, max-age=31536000, immutable";
+        add_header Cross-Origin-Resource-Policy "same-origin" always;
+    }
+
+    # SPA Fallback to index.html
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}

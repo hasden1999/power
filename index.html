@@ -3,17 +3,22 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <meta name="theme-color" content="#0f172a" />
-    <title>نظام إدارة المولدات الأهلية | جباية المشتركين أوفلاين</title>
-    <!-- Google Fonts: Cairo & Tajawal -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#0E7490" />
+    <title>أمبيرجي | نظام إدارة المولدات الأهلية</title>
+    <meta name="description" content="نظام إدارة المولدات الأهلية والجباية الميدانية في العراق أوفلاين 100%" />
+
+    <!-- Apple Standalone PWA Meta Tags -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="أمبيرجي" />
+    <link rel="apple-touch-icon" href="/favicon.svg" />
+
+    <!-- Local Offline Font Preload (Zero-CDN Architecture) -->
+    <link rel="preload" href="/fonts/cairo-arabic.woff2" as="font" type="font/woff2" crossorigin />
   </head>
   <body class="bg-slate-900 text-slate-100 font-sans antialiased select-none">
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
-

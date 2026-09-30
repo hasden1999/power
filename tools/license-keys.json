@@ -1,0 +1,11 @@
+{
+  "publicKeyPem": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAExg2gn02kP0Oh3SXRKG4F02D8/W8Q\n/GY2MfiO/6j/rcmu5UdvQ1IkZ9tzlCB8Tf8m6sgQLLbYd+Jzlk5aMaVx4w==\n-----END PUBLIC KEY-----\n",
+  "privateKeyPem": "-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgClRTKHy/Xr9HEdAn\nh1HUTCfk9oG4TuCC4ewcDhrwPMShRANCAATGDaCfTaQ/Q6HdJdEobgXTYPz9bxD8\nZjYx+I7/qP+tya7lR29DUiRn23OUIHxN/ybqyBAstth34nOWTloxpXHj\n-----END PRIVATE KEY-----\n",
+  "publicJwk": {
+    "kty": "EC",
+    "x": "xg2gn02kP0Oh3SXRKG4F02D8_W8Q_GY2MfiO_6j_rck",
+    "y": "ruVHb0NSJGfbc5QgfE3_JurIECy22Hfic5ZOWjGlceM",
+    "crv": "P-256"
+  },
+  "createdAt": "2026-09-30T08:05:47.618Z"
+}

@@ -1,32 +1,149 @@
-# React + TypeScript + Vite
+# منظومة «أمبيرجي» لإدارة المولدات الأهلية والجباية الميدانية (PWA)
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+تطبيق ويب تقدمي إنتاجي متكامل (**Offline-First Progressive Web App**)، مصمم خصيصاً لأصحاب ومتعهدي المولدات الأهلية في العراق. يعمل بعد التثبيت كتطبيق أصلي مستقل تماماً، ويعتمد على محرك **SQLite WebAssembly** والتخزين الدائم **OPFS** (Origin Private File System) بنسبة 100% بدون أي خوادم أو شبكات CDN خارجية.
 
-Currently, two official plugins are available:
+---
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## ⚡ المزايا والخصائص التقنية
 
-## React Compiler
+1. **معمارية خالية تماماً من الـ CDN (Zero-CDN Architecture):**
+   - كافة الخطوط العربية (Cairo woff2)، مكتبات التشفير، ومحرك `sqlite3.wasm` مدمجة محلياً داخل حزمة البناء.
+   - لا يتم إرسال أي طلب شبكة خارجي وقت التشغيل على الإطلاق.
+2. **قاعدة بيانات SQLite WASM + OPFS:**
+   - تخزين دائم فائق السرعة عبر Web Worker مستقل.
+   - حماية كاملة من المسح التلقائي على أجهزة iOS/Safari بفضل عزل بيئة الـ Standalone.
+   - وضع تجربة مؤقت للذاكرة (:memory:) عند الفتح من متصفح الويب العادي لتنبيه المستخدم.
+3. **نظام تراخيص رقمي مشفر (100% Offline Licensing):**
+   - يعتمد على تشفير المفتاح العام/الخاص (ECDSA P-256 + SHA-256).
+   - تجربة مجانية كاملة لمدة 30 يوماً من أول تشغيل.
+   - بعد انتهاء الـ 30 يوماً: قفل إضافة مشتركين أو وصولات جديدة فقط، مع إبقاء استعراض السجلات، طباعة الوصولات، وتصدير التقارير متاحاً دائماً للمستخدم بدون فقدان أي بيانات.
+4. **وصل قبض حراري ميداني (Thermal Invoicing 58mm/80mm):**
+   - تنسيق طباعة حرارية دقيق متوافق مع طابعات البلوتوث المحمولة، يدعم المشاركة والطباعة الفورية.
+5. **نسخ احتياطي واستعادة آمنة:**
+   - لقطات تلقائية داخل مساحة OPFS كل 50 تعديلاً (حفظ آخر 7 نسخ تدويرية).
+   - تصدير واستيراد قواعد بيانات SQLite مع فحص سلامة الجداول `PRAGMA integrity_check`.
+   - تصدير كشوفات الحسابات والمشتركين إلى جداول CSV / Excel.
+6. **واجهة عربية أصيلة (RTL Mobile-First):**
+   - تصميم فائق الخفة والسرعة بـ **Vanilla TypeScript** بدون أي أطر عمل ثقيلة.
+   - وضع النهار فائق التباين (Sunlight High Contrast Mode) للقراءة تحت أشعة الشمس المباشرة أثناء الجباية الميدانية.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+---
 
-## Expanding the Oxlint configuration
+## 🚀 التشغيل والتطوير المحلي
 
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
+### متطلبات التشغيل
+- Node.js (الإصدار 18 فما فوق).
+- مدير الحزم npm أو pnpm.
 
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+### 1. تثبيت الحزم
+```bash
+npm install
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+### 2. تشغيل خادم التطوير
+```bash
+npm run dev
+```
+> **ملاحظة:** يتم توليد شهادة SSL محلية تلقائياً (`basicSsl`) لتمكين ترويسات العزل `Cross-Origin-Opener-Policy` و`Cross-Origin-Embedder-Policy` الضرورية لـ SQLite OPFS.
+
+### 3. بناء واختبار حزمة الإنتاج
+لاختبار الـ Service Worker وحزمة الـ PWA الإنتاجية محلياً:
+```bash
+npm run build
+npm run preview
+```
+
+---
+
+## 🌐 النشر والاستضافة
+
+### الخيار الأول: النشر على Vercel (موصى به)
+ملف `vercel.json` جاهز ومضبوط مسبقاً بترويسات الأمان وعزل النطاقات وإعدادات الكاش الصحيحة:
+1. اربط مستودع GitHub بحسابك على [Vercel](https://vercel.com).
+2. إعدادات المشروع:
+   - **Framework Preset:** Vite
+   - **Build Command:** `npm run build`
+   - **Output Directory:** `dist`
+3. اضغط **Deploy**. سيعمل التطبيق مباشرة بدعم HTTPS وترويسات COOP/COEP كاملة.
+
+### الخيار الثاني: النشر على استضافة خاصة (Apache)
+ملف `public/.htaccess` مدمج داخل حزمة البناء. تأكد من تفعيل الموديلات التالية في Apache:
+```apache
+a2enmod rewrite
+a2enmod headers
+a2enmod mime
+```
+وتأكد من تفعيل HTTPS الإلزامي لميزات PWA وOPFS.
+
+### الخيار الثالث: النشر عبر Nginx
+استخدم النموذج الجاهز في ملف `nginx.conf.example`:
+```nginx
+# ترويسات العزل الإلزامية لـ SQLite OPFS
+add_header Cross-Origin-Opener-Policy "same-origin" always;
+add_header Cross-Origin-Embedder-Policy "require-corp" always;
+```
+
+---
+
+## 🔐 نظام إدارة التراخيص الرقمية (Licensing CLI)
+
+يحتوي مجلد `tools/` على سكربت Node.js مستقل لإصدار مفاتيح التفعيل الموقعة رقمياً دون أي اتصال بالإنترنت.
+
+### 1. توليد زوج المفاتيح (يُنفذ مرة واحدة فقط):
+```bash
+node tools/generate-license.js generate-keys
+```
+سيتم حفظ المفاتيح في `tools/license-keys.json`.
+
+### 2. إصدار كود ترخيص لمولدة معينة:
+```bash
+node tools/generate-license.js issue --name "مولدة النور الأهلية" --phone "07701234567" --days 365
+```
+
+### 3. تفعيل الترخيص في التطبيق:
+1. انسخ الكود الناتج (يبدأ بـ `AMPEREJI-...`).
+2. افتح التطبيق ← شاشة **الإعدادات** ← ألصق الكود واضغط **تفعيل الآن**.
+3. سيتم فحص التوقيع الرقمي فورياً عبر WebCrypto وتفعيل المنظومة بدون الحاجة لأي اتصال بالإنترنت.
+
+---
+
+## 💳 ربط نظام التراخيص ببوابات الدفع الإلكتروني
+
+لأتمتة بيع الاشتراكات عبر الإنترنت (ZainCash, Qi Card, Stripe, Lemon Squeezy):
+
+```
+العميل يدفع عبر بوابة الدفع الإلكتروني
+    ⬇️
+Webhook من بوابة الدفع إلى دالة سحابية (Vercel Serverless Function)
+    ⬇️
+الدالة تحتوي على المفتاح الخاص في متغيرات البيئة (ENV: PRIVATE_KEY_PEM)
+    ⬇️
+توليد كود الترخيص الموقع رقمياً للمشترك
+    ⬇️
+عرض كود التفعيل في صفحة إتمام الدفع أو إرساله عبر الرسائل القصيرة SMS / واتساب
+```
+
+---
+
+## 📱 قائمة الاختبار على الأجهزة الفعلية (QA Checklist)
+
+- [ ] **أندرويد (Google Chrome):**
+  - ظهور لافتة التثبيت في أسفل الشاشة.
+  - الضغط على "تثبيت" وظهور التطبيق كأيقونة مستقلة بدون شريط عنوان المتصفح.
+- [ ] **آيفون / آيباد (Apple Safari):**
+  - ظهور النافذة الإرشادية لشرح خطوات "إضافة إلى الصفحة الرئيسية".
+  - التأكد من فتح التطبيق بوضع Standalone وتفعيل التخزين الدائم OPFS.
+- [ ] **اختبار وضع الطيران (Airplane Mode):**
+  - تفعيل وضع الطيران وإغلاق التطبيق بالكامل ثم إعادة فتحه.
+  - التأكد من أن جميع الشاشات وإصدار الوصولات والبحث تعمل بسلاسة تامة.
+- [ ] **اختبار صمود واستعادة البيانات:**
+  - إضافة مشتركين وقوائم.
+  - إغلاق المتصفح وإعادة تشغيل الهاتف والتأكد من بقاء البيانات كاملة.
+  - تجربة تصدير نسخة احتياطية `.sqlite` واستعادتها.
+
+---
+
+## 🔒 سياسة الخصوصية والأمان
+
+- **بياناتك على جهازك فقط:** لا يحتوي التطبيق على أي خادم تخزين سحابي، ولا يتم تتبع أي مستخدم أو جمع أي بيانات شخصية أو مالية.
+- **التشفير الداخلي:** يتم تخزين قاعدة البيانات داخل مساحة التخزين الخاصة للمتصفح (OPFS) التي لا يمكن للمواقع الأخرى أو التطبيقات الخارجية الوصول إليها.
