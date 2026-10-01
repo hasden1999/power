@@ -11,6 +11,11 @@ import type {
   AppSettings,
   MonthlyReport,
   BillStatus,
+  Tenant,
+  TenantOnboardingInput,
+  SaaSStats,
+  TenantPlan,
+  TenantStatus,
 } from '../types/index.ts';
 import { platform } from '../platform.ts';
 
@@ -480,6 +485,7 @@ export class DatabaseClient {
       modificationCount: Number(map.modification_count) || 0,
       lastBackup: map.last_backup || '',
       lastExternalExport: map.last_external_export || '',
+      activeTenantId: map.active_tenant_id || 'tenant-default',
     };
   }
 
@@ -495,6 +501,7 @@ export class DatabaseClient {
       modificationCount: 'modification_count',
       lastBackup: 'last_backup',
       lastExternalExport: 'last_external_export',
+      activeTenantId: 'active_tenant_id',
     };
 
     for (const [prop, val] of Object.entries(updates)) {
@@ -566,8 +573,217 @@ export class DatabaseClient {
   }
 
   /* ----------------------------------------------------
+   * SAAS MULTI-TENANCY & GENERATOR ONBOARDING
+   * ---------------------------------------------------- */
+
+  public async getTenants(search: string = '', statusFilter: string = 'الكل'): Promise<Tenant[]> {
+    let sql = `
+      SELECT t.*, COUNT(s.id) as sub_count
+      FROM tenants t
+      LEFT JOIN subscribers s ON (s.tenant_id = t.id OR (t.id = 'tenant-default' AND (s.tenant_id IS NULL OR s.tenant_id = '' OR s.tenant_id = 'tenant-default')))
+      WHERE 1=1
+    `;
+    const params: any[] = [];
+
+    if (search.trim()) {
+      const q = `%${search.trim()}%`;
+      sql += ' AND (t.name LIKE ? OR t.owner_name LIKE ? OR t.phone LIKE ? OR t.address LIKE ?)';
+      params.push(q, q, q, q);
+    }
+
+    if (statusFilter !== 'الكل' && statusFilter) {
+      sql += ' AND t.status = ?';
+      params.push(statusFilter);
+    }
+
+    sql += ' GROUP BY t.id ORDER BY t.created_at DESC';
+
+    const rows = await this.send<any[]>('GET_ALL', { sql, params });
+    return rows.map((r) => this.mapTenant(r));
+  }
+
+  public async getTenantById(id: string): Promise<Tenant | null> {
+    const row = await this.send<any>('GET_ONE', {
+      sql: `SELECT t.*, COUNT(s.id) as sub_count
+            FROM tenants t
+            LEFT JOIN subscribers s ON (s.tenant_id = t.id OR (t.id = 'tenant-default' AND (s.tenant_id IS NULL OR s.tenant_id = '')))
+            WHERE t.id = ? GROUP BY t.id`,
+      params: [id],
+    });
+    return row ? this.mapTenant(row) : null;
+  }
+
+  public async addTenant(input: TenantOnboardingInput): Promise<Tenant> {
+    const id = `tenant-${crypto.randomUUID().slice(0, 8)}`;
+    const now = new Date();
+    // Default 30-day trial for new onboarded generator owners
+    const expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString();
+    const plan = input.plan || 'trial';
+    const planPrice = plan === 'monthly' ? 15000 : plan === 'yearly' ? 150000 : 0;
+    const defaultPrice = input.defaultPrice || 12000;
+
+    await this.send('RUN', {
+      sql: `INSERT INTO tenants (id, name, owner_name, phone, address, plan, plan_price, status, expires_at, is_blocked, default_price, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'trial', ?, 0, ?, ?)`,
+      params: [
+        id,
+        input.name.trim(),
+        input.ownerName.trim(),
+        input.phone.trim(),
+        input.address.trim(),
+        plan,
+        planPrice,
+        expiresAt,
+        defaultPrice,
+        now.toISOString(),
+      ],
+    });
+
+    await this.notifyModification();
+    const created = await this.getTenantById(id);
+    if (!created) throw new Error('فشل استرجاع بيانات المولدة المنشأة');
+    return created;
+  }
+
+  public async updateTenant(id: string, updates: Partial<Tenant>): Promise<void> {
+    const existing = await this.getTenantById(id);
+    if (!existing) throw new Error('المولدة غير موجودة');
+
+    const merged = { ...existing, ...updates };
+
+    await this.send('RUN', {
+      sql: `UPDATE tenants SET
+            name = ?, owner_name = ?, phone = ?, address = ?, plan = ?, plan_price = ?,
+            status = ?, expires_at = ?, is_blocked = ?, license_key = ?, default_price = ?
+            WHERE id = ?`,
+      params: [
+        merged.name.trim(),
+        merged.ownerName.trim(),
+        merged.phone.trim(),
+        merged.address.trim(),
+        merged.plan,
+        merged.planPrice,
+        merged.status,
+        merged.expiresAt,
+        merged.isBlocked ? 1 : 0,
+        merged.licenseKey || '',
+        merged.defaultPrice,
+        id,
+      ],
+    });
+
+    await this.notifyModification();
+  }
+
+  public async activateOrExtendTenant(id: string, days: number, plan: TenantPlan): Promise<void> {
+    const tenant = await this.getTenantById(id);
+    if (!tenant) throw new Error('المولدة غير موجودة');
+
+    let currentExp = new Date(tenant.expiresAt).getTime();
+    if (isNaN(currentExp) || currentExp < Date.now()) {
+      currentExp = Date.now();
+    }
+    const newExpiresAt = new Date(currentExp + days * 24 * 60 * 60 * 1000).toISOString();
+    const planPrice = plan === 'yearly' ? 150000 : 15000;
+
+    await this.send('RUN', {
+      sql: `UPDATE tenants SET
+            status = 'active', plan = ?, plan_price = ?, expires_at = ?, is_blocked = 0
+            WHERE id = ?`,
+      params: [plan, planPrice, newExpiresAt, id],
+    });
+
+    await this.notifyModification();
+  }
+
+  public async toggleTenantBlock(id: string): Promise<boolean> {
+    const tenant = await this.getTenantById(id);
+    if (!tenant) throw new Error('المولدة غير موجودة');
+
+    const newBlocked = !tenant.isBlocked;
+    const newStatus: TenantStatus = newBlocked ? 'blocked' : 'active';
+
+    await this.send('RUN', {
+      sql: 'UPDATE tenants SET is_blocked = ?, status = ? WHERE id = ?',
+      params: [newBlocked ? 1 : 0, newStatus, id],
+    });
+
+    await this.notifyModification();
+    return newBlocked;
+  }
+
+  public async deleteTenant(id: string): Promise<void> {
+    await this.send('RUN', {
+      sql: 'DELETE FROM tenants WHERE id = ?',
+      params: [id],
+    });
+    await this.notifyModification();
+  }
+
+  public async getSaaSStats(): Promise<SaaSStats> {
+    const tenants = await this.getTenants();
+    const totalTenants = tenants.length;
+    const activeTenants = tenants.filter((t) => t.status === 'active' && !t.isBlocked).length;
+    const trialTenants = tenants.filter((t) => t.status === 'trial' && !t.isBlocked).length;
+    const expiredTenants = tenants.filter((t) => t.status === 'expired' && !t.isBlocked).length;
+    const blockedTenants = tenants.filter((t) => t.isBlocked).length;
+    const totalSubscribers = tenants.reduce((sum, t) => sum + (t.subscribersCount || 0), 0);
+    const estimatedRevenue = tenants
+      .filter((t) => t.status === 'active')
+      .reduce((sum, t) => sum + (t.plan === 'yearly' ? 150000 : 15000), 0);
+
+    return {
+      totalTenants,
+      activeTenants,
+      trialTenants,
+      expiredTenants,
+      blockedTenants,
+      totalSubscribers,
+      estimatedRevenue,
+    };
+  }
+
+  public async getCurrentTenantId(): Promise<string> {
+    const settings = await this.getSettings();
+    return settings.activeTenantId || 'tenant-default';
+  }
+
+  public async setCurrentTenant(tenantId: string): Promise<void> {
+    const tenant = await this.getTenantById(tenantId);
+    if (!tenant) throw new Error('المولدة غير موجودة');
+
+    await this.updateSettings({
+      activeTenantId: tenant.id,
+      generatorName: tenant.name,
+      ownerPhone: tenant.phone,
+      defaultAmperePrice: tenant.defaultPrice,
+      licenseKey: tenant.licenseKey || '',
+    });
+    window.dispatchEvent(new CustomEvent('ampereji:tenant-changed', { detail: tenant }));
+  }
+
+  /* ----------------------------------------------------
    * PRIVATE ROW MAPPERS
    * ---------------------------------------------------- */
+
+  private mapTenant(row: any): Tenant {
+    return {
+      id: row.id,
+      name: row.name || 'مولدة بدون اسم',
+      ownerName: row.owner_name || '',
+      phone: row.phone || '',
+      address: row.address || '',
+      plan: row.plan || 'trial',
+      planPrice: Number(row.plan_price) || 0,
+      status: row.status || 'trial',
+      expiresAt: row.expires_at || '',
+      isBlocked: Boolean(row.is_blocked),
+      licenseKey: row.license_key || '',
+      defaultPrice: Number(row.default_price) || 12000,
+      subscribersCount: Number(row.sub_count) || 0,
+      createdAt: row.created_at || '',
+    };
+  }
 
   private mapSubscriber(row: any): Subscriber {
     return {

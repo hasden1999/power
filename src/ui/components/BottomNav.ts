@@ -3,7 +3,7 @@
  * Responsive Mobile Bottom Navigation Bar (44px+ touch targets, RTL support)
  */
 
-export type ScreenId = 'subscribers' | 'billing' | 'expenses' | 'reports' | 'settings';
+export type ScreenId = 'subscribers' | 'billing' | 'expenses' | 'reports' | 'settings' | 'saas';
 
 interface NavItem {
   id: ScreenId;

@@ -5,7 +5,7 @@
  */
 
 import sqlite3InitModule, { type Sqlite3Static } from '@sqlite.org/sqlite-wasm';
-import { SCHEMA_SQL, DEFAULT_SETTINGS, SAMPLE_SUBSCRIBERS } from './schema.ts';
+import { SCHEMA_SQL, DEFAULT_SETTINGS, SAMPLE_SUBSCRIBERS, SAMPLE_TENANTS } from './schema.ts';
 
 let sqlite3: Sqlite3Static | null = null;
 let db: any = null;
@@ -104,6 +104,35 @@ async function initDatabase(useOpfs: boolean): Promise<{ isOpfs: boolean; versio
         ],
       });
     }
+  }
+
+  // Seed sample tenants if empty
+  try {
+    const tenantsCount = getOneRow('SELECT COUNT(*) as count FROM tenants', []);
+    if (!tenantsCount || tenantsCount.count === 0) {
+      for (const t of SAMPLE_TENANTS) {
+        db.exec({
+          sql: `INSERT OR IGNORE INTO tenants (id, name, owner_name, phone, address, plan, plan_price, status, expires_at, is_blocked, license_key, default_price)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          bind: [
+            t.id,
+            t.name,
+            t.owner_name,
+            t.phone,
+            t.address,
+            t.plan,
+            t.plan_price,
+            t.status,
+            t.expires_at,
+            t.is_blocked,
+            t.license_key,
+            t.default_price,
+          ],
+        });
+      }
+    }
+  } catch (err) {
+    console.warn('[SQLiteWorker] Tenants seeding warning:', err);
   }
 
   return {

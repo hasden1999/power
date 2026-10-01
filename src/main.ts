@@ -17,6 +17,8 @@ import { BillingScreen } from './ui/screens/BillingScreen.ts';
 import { ExpensesScreen } from './ui/screens/ExpensesScreen.ts';
 import { ReportsScreen } from './ui/screens/ReportsScreen.ts';
 import { SettingsScreen } from './ui/screens/SettingsScreen.ts';
+import { SaaSScreen } from './ui/screens/SaaSScreen.ts';
+import { registerTenantModal } from './ui/components/RegisterTenantModal.ts';
 
 // 1. Service Worker for PWA Offline Execution
 if ('serviceWorker' in navigator) {
@@ -163,31 +165,58 @@ class AmperejiApp {
 
     // Badges & Actions
     const rightCol = document.createElement('div');
-    rightCol.className = 'flex items-center gap-2 text-xs';
+    rightCol.className = 'flex items-center gap-1.5 sm:gap-2 text-xs flex-wrap justify-end';
+
+    // Register Generator Button
+    const regBtn = document.createElement('button');
+    regBtn.type = 'button';
+    regBtn.className =
+      'min-h-[40px] px-3 py-1.5 rounded-xl bg-cyan-900/60 hover:bg-cyan-800 text-cyan-200 border border-cyan-700/60 font-bold transition cursor-pointer flex items-center gap-1';
+    regBtn.innerHTML = '<span>➕ تسجيل مولدة</span>';
+    regBtn.title = 'تسجيل صاحب مولدة جديد في المنظومة';
+    regBtn.addEventListener('click', () => {
+      registerTenantModal.show(async () => {
+        await this.renderCurrentScreen();
+      });
+    });
+
+    // SaaS Super Admin Dashboard Button
+    const saasBtn = document.createElement('button');
+    saasBtn.type = 'button';
+    saasBtn.id = 'saas-admin-header-btn';
+    saasBtn.className =
+      'min-h-[40px] px-3 py-1.5 rounded-xl bg-purple-950/70 hover:bg-purple-900 text-purple-200 border border-purple-800/70 font-black transition cursor-pointer flex items-center gap-1 shadow-sm';
+    saasBtn.innerHTML = '<span>🏢 منصة SaaS</span>';
+    saasBtn.title = 'فتح لوحة تحكم منصة المولدات (Super Admin)';
+    saasBtn.addEventListener('click', () => {
+      this.navigateTo('saas');
+    });
 
     // Sunlight High Contrast Toggle
     const sunBtn = document.createElement('button');
     sunBtn.type = 'button';
     sunBtn.className =
-      'min-h-[40px] px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 font-bold transition cursor-pointer flex items-center gap-1';
-    sunBtn.innerHTML = '☀️ وضع الشمس';
+      'min-h-[40px] px-2.5 sm:px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 font-bold transition cursor-pointer flex items-center gap-1';
+    sunBtn.innerHTML = '☀️';
     sunBtn.title = 'تبديل وضع النهار فائق التباين للعمل الميداني تحت أشعة الشمس';
     sunBtn.addEventListener('click', () => {
       this.isSunlightMode = !this.isSunlightMode;
       document.documentElement.classList.toggle('sunlight-mode', this.isSunlightMode);
       document.body.classList.toggle('sunlight-mode', this.isSunlightMode);
-      sunBtn.innerHTML = this.isSunlightMode ? '🌙 الوضع الداكن' : '☀️ وضع الشمس';
+      sunBtn.innerHTML = this.isSunlightMode ? '🌙' : '☀️';
     });
 
     const info = platform.getPlatformInfo();
     const modeBadge = document.createElement('span');
-    modeBadge.className = `hidden sm:inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-bold border ${
+    modeBadge.className = `hidden lg:inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-bold border ${
       info.isStandalone
         ? 'bg-emerald-950 text-emerald-300 border-emerald-800'
         : 'bg-amber-950 text-amber-300 border-amber-800'
     }`;
     modeBadge.textContent = info.isStandalone ? 'تطبيق مثبت 📱' : 'متصفح ويب 🌐';
 
+    rightCol.appendChild(regBtn);
+    rightCol.appendChild(saasBtn);
     rightCol.appendChild(sunBtn);
     rightCol.appendChild(modeBadge);
 
@@ -223,6 +252,9 @@ class AmperejiApp {
         break;
       case 'settings':
         await new SettingsScreen(this.screenContainer).render();
+        break;
+      case 'saas':
+        await new SaaSScreen(this.screenContainer).render();
         break;
     }
   }

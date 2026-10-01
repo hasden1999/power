@@ -1,9 +1,28 @@
 /**
  * src/db/schema.ts
- * Database schema definition, default seeds, and migrations for SQLite WASM
+ * Database schema definition, default seeds, and SaaS Multi-Tenant support
  */
 
 export const SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS tenants (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  owner_name TEXT NOT NULL,
+  phone TEXT NOT NULL,
+  address TEXT DEFAULT '',
+  plan TEXT DEFAULT 'trial' CHECK(plan IN ('trial','monthly','yearly')),
+  plan_price REAL DEFAULT 0,
+  status TEXT DEFAULT 'trial' CHECK(status IN ('active','trial','expired','blocked','pending')),
+  expires_at TEXT NOT NULL,
+  is_blocked INTEGER DEFAULT 0,
+  license_key TEXT DEFAULT '',
+  default_price REAL DEFAULT 12000,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_tenants_phone ON tenants(phone);
+CREATE INDEX IF NOT EXISTS idx_tenants_status ON tenants(status);
+
 CREATE TABLE IF NOT EXISTS subscribers (
   id TEXT PRIMARY KEY,
   full_name TEXT NOT NULL,
@@ -16,6 +35,7 @@ CREATE TABLE IF NOT EXISTS subscribers (
   line_type TEXT NOT NULL DEFAULT 'عادي' CHECK(line_type IN ('عادي','ذهبي','ليلي','صباحي')),
   line_status TEXT NOT NULL DEFAULT 'نشط' CHECK(line_status IN ('نشط','مقطوع','معلق')),
   notes TEXT DEFAULT '',
+  tenant_id TEXT DEFAULT 'tenant-default',
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -23,6 +43,7 @@ CREATE TABLE IF NOT EXISTS subscribers (
 CREATE INDEX IF NOT EXISTS idx_subscribers_name ON subscribers(full_name);
 CREATE INDEX IF NOT EXISTS idx_subscribers_status ON subscribers(line_status);
 CREATE INDEX IF NOT EXISTS idx_subscribers_phone ON subscribers(phone);
+CREATE INDEX IF NOT EXISTS idx_subscribers_tenant ON subscribers(tenant_id);
 
 CREATE TABLE IF NOT EXISTS billing (
   id TEXT PRIMARY KEY,
@@ -36,6 +57,7 @@ CREATE TABLE IF NOT EXISTS billing (
   payment_date TEXT,
   status TEXT NOT NULL DEFAULT 'غير مسدد' CHECK(status IN ('واصل','متبقي','غير مسدد')),
   notes TEXT DEFAULT '',
+  tenant_id TEXT DEFAULT 'tenant-default',
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE(subscriber_id, month, year)
 );
@@ -51,6 +73,7 @@ CREATE TABLE IF NOT EXISTS expenses (
   total_amount REAL NOT NULL,
   expense_date TEXT NOT NULL DEFAULT (date('now')),
   notes TEXT DEFAULT '',
+  tenant_id TEXT DEFAULT 'tenant-default',
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -77,11 +100,71 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   currency: 'د.ع',
   trial_start_date: new Date().toISOString(),
   license_key: '',
-  db_version: '1',
+  db_version: '2',
   modification_count: '0',
   last_backup: '',
   last_external_export: '',
+  active_tenant_id: 'tenant-default',
 };
+
+export const SAMPLE_TENANTS = [
+  {
+    id: 'tenant-default',
+    name: 'مولدة حي السلام الأهلية',
+    owner_name: 'أبو أحمد البغدادي',
+    phone: '07700000000',
+    address: 'بغداد - حي السلام',
+    plan: 'trial',
+    plan_price: 0,
+    status: 'trial',
+    expires_at: new Date(Date.now() + 28 * 24 * 60 * 60 * 1000).toISOString(),
+    is_blocked: 0,
+    license_key: '',
+    default_price: 12000,
+  },
+  {
+    id: 'tenant-baghdad-01',
+    name: 'مولدة القدس الأهلية',
+    owner_name: 'أبو كرار المنصوري',
+    phone: '07701234567',
+    address: 'بغداد - المنصور - محلة 605',
+    plan: 'monthly',
+    plan_price: 15000,
+    status: 'active',
+    expires_at: new Date(Date.now() + 25 * 24 * 60 * 60 * 1000).toISOString(),
+    is_blocked: 0,
+    license_key: '',
+    default_price: 12000,
+  },
+  {
+    id: 'tenant-basra-02',
+    name: 'مولدة النور والبركة',
+    owner_name: 'أبو سجاد البصري',
+    phone: '07801234567',
+    address: 'البصرة - العشار - شارع الكويت',
+    plan: 'yearly',
+    plan_price: 150000,
+    status: 'active',
+    expires_at: new Date(Date.now() + 180 * 24 * 60 * 60 * 1000).toISOString(),
+    is_blocked: 0,
+    license_key: '',
+    default_price: 14000,
+  },
+  {
+    id: 'tenant-najaf-03',
+    name: 'مولدة الرافدين المركزية',
+    owner_name: 'أبو مرتضى النجفي',
+    phone: '07719876543',
+    address: 'النجف الأشرف - الكوفة - قرب الميثم',
+    plan: 'trial',
+    plan_price: 0,
+    status: 'expired',
+    expires_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+    is_blocked: 0,
+    license_key: '',
+    default_price: 11000,
+  },
+];
 
 export const SAMPLE_SUBSCRIBERS = [
   {
@@ -96,6 +179,7 @@ export const SAMPLE_SUBSCRIBERS = [
     line_type: 'عادي',
     line_status: 'نشط',
     notes: 'خط رئيسي - منزل',
+    tenant_id: 'tenant-default',
   },
   {
     id: 'sub-sample-2',
@@ -109,6 +193,7 @@ export const SAMPLE_SUBSCRIBERS = [
     line_type: 'ذهبي',
     line_status: 'نشط',
     notes: 'محل تجاري',
+    tenant_id: 'tenant-default',
   },
   {
     id: 'sub-sample-3',
@@ -122,5 +207,6 @@ export const SAMPLE_SUBSCRIBERS = [
     line_type: 'ذهبي',
     line_status: 'نشط',
     notes: 'عيادة خاصة',
+    tenant_id: 'tenant-default',
   },
 ];

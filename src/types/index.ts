@@ -1,13 +1,52 @@
 /**
  * src/types/index.ts
  * Core domain types and interfaces for Ampereji (أمبيرجي)
- * Offline-first PWA for private generator management in Iraq
+ * Multi-Tenant SaaS Platform for Private Generator Management in Iraq
  */
 
 export type LineType = 'عادي' | 'ذهبي' | 'ليلي' | 'صباحي';
 export type LineStatus = 'نشط' | 'مقطوع' | 'معلق';
 export type BillStatus = 'واصل' | 'متبقي' | 'غير مسدد';
 export type ExpenseType = 'وقود' | 'زيت_وفلاتر' | 'صيانة' | 'أجور' | 'إيجار' | 'نثريات';
+
+export type TenantPlan = 'trial' | 'monthly' | 'yearly';
+export type TenantStatus = 'active' | 'trial' | 'expired' | 'blocked' | 'pending';
+
+export interface Tenant {
+  id: string;
+  name: string; // اسم المولدة
+  ownerName: string; // اسم صاحب المولدة
+  phone: string; // رقم الهاتف
+  address: string; // المحافظة / العنوان
+  plan: TenantPlan;
+  planPrice: number;
+  status: TenantStatus;
+  expiresAt: string;
+  isBlocked: boolean;
+  licenseKey: string;
+  defaultPrice: number;
+  subscribersCount?: number;
+  createdAt: string;
+}
+
+export interface TenantOnboardingInput {
+  name: string;
+  ownerName: string;
+  phone: string;
+  address: string;
+  defaultPrice?: number;
+  plan?: TenantPlan;
+}
+
+export interface SaaSStats {
+  totalTenants: number;
+  activeTenants: number;
+  trialTenants: number;
+  expiredTenants: number;
+  blockedTenants: number;
+  totalSubscribers: number;
+  estimatedRevenue: number;
+}
 
 export interface Subscriber {
   id: string;
@@ -21,6 +60,7 @@ export interface Subscriber {
   lineType: LineType;
   lineStatus: LineStatus;
   notes: string;
+  tenantId?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -40,6 +80,7 @@ export interface BillingRecord {
   paymentDate: string | null;
   status: BillStatus;
   notes: string;
+  tenantId?: string;
   createdAt: string;
 }
 
@@ -50,6 +91,7 @@ export interface Expense {
   totalAmount: number;
   expenseDate: string;
   notes: string;
+  tenantId?: string;
   createdAt: string;
 }
 
@@ -64,6 +106,7 @@ export interface AppSettings {
   modificationCount: number;
   lastBackup: string;
   lastExternalExport: string;
+  activeTenantId?: string;
 }
 
 export interface LicenseStatus {

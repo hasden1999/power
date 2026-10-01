@@ -6,12 +6,21 @@
 
 import type { LicenseStatus, AppSettings } from '../types/index.ts';
 
-// Public verification key embedded into build (Public Key Only — Private Key stays in tools/)
+// Public verification key embedded into build
 export const PUBLIC_KEY_JWK: JsonWebKey = {
   kty: 'EC',
   x: 'xg2gn02kP0Oh3SXRKG4F02D8_W8Q_GY2MfiO_6j_rck',
   y: 'ruVHb0NSJGfbc5QgfE3_JurIECy22Hfic5ZOWjGlceM',
   crv: 'P-256',
+};
+
+// Private signing key for SaaS Super Admin Dashboard
+export const PRIVATE_KEY_JWK: JsonWebKey = {
+  kty: 'EC',
+  x: 'xg2gn02kP0Oh3SXRKG4F02D8_W8Q_GY2MfiO_6j_rck',
+  y: 'ruVHb0NSJGfbc5QgfE3_JurIECy22Hfic5ZOWjGlceM',
+  crv: 'P-256',
+  d: 'ClRTKHy_Xr9HEdAnh1HUTCfk9oG4TuCC4ewcDhrwPMQ',
 };
 
 export interface DecodedLicensePayload {
@@ -57,6 +66,62 @@ export class LicenseManager {
       bytes[i] = binary.charCodeAt(i);
     }
     return bytes;
+  }
+
+  /**
+   * Helper to encode byte array to base64url
+   */
+  private bytesToBase64Url(bytes: Uint8Array): string {
+    let binary = '';
+    for (let i = 0; i < bytes.length; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+
+  /**
+   * Issue a signed offline license for a generator (Used by SaaS Super Admin)
+   */
+  public async issueLicense(
+    generatorName: string,
+    ownerPhone: string,
+    validDays: number = 365,
+    licenseType: string = 'yearly'
+  ): Promise<string> {
+    const privKey = await window.crypto.subtle.importKey(
+      'jwk',
+      PRIVATE_KEY_JWK,
+      { name: 'ECDSA', namedCurve: 'P-256' },
+      false,
+      ['sign']
+    );
+
+    const now = new Date();
+    const expiresAt = validDays > 0 ? new Date(now.getTime() + validDays * 24 * 60 * 60 * 1000).toISOString() : null;
+
+    const payload: DecodedLicensePayload = {
+      generatorName: generatorName || 'المولدة الأهلية',
+      ownerPhone: ownerPhone || '',
+      issuedAt: now.toISOString(),
+      expiresAt,
+      licenseType,
+      system: 'ampereji',
+      version: '1.0',
+    };
+
+    const payloadJson = JSON.stringify(payload);
+    const payloadBytes = new TextEncoder().encode(payloadJson);
+    const payloadB64 = this.bytesToBase64Url(payloadBytes);
+
+    const dataToSign = new TextEncoder().encode(payloadB64);
+    const sigBuffer = await window.crypto.subtle.sign(
+      { name: 'ECDSA', hash: { name: 'SHA-256' } },
+      privKey,
+      dataToSign
+    );
+
+    const sigB64 = this.bytesToBase64Url(new Uint8Array(sigBuffer));
+    return `AMPEREJI-${payloadB64}.${sigB64}`;
   }
 
   /**
