@@ -9,6 +9,7 @@ import { db } from '../../db/database.ts';
 import { licenseManager } from '../../license/license.ts';
 import { backupManager, type BackupSnapshot } from '../../backup/backup.ts';
 import { getEntitlement, type Entitlement } from '../../services/entitlementService.ts';
+import { authService } from '../../services/authService.ts';
 import { escapeHtml } from '../../utils/security.ts';
 import type { AppSettings, LicenseStatus, Tenant, TenantPlan, TenantStatus } from '../../types/index.ts';
 
@@ -315,6 +316,58 @@ export class SettingsScreen {
     `;
     root.appendChild(backupCard);
 
+    // 6. Security & Session Management (تسجيل الخروج وإدارة الجلسة)
+    const session = authService.getSession();
+    const isSuperAdmin = authService.isSuperAdmin();
+
+    const sessionRoleLabel = isSuperAdmin
+      ? `مدير المنصة (${escapeHtml(session?.username || 'admin')})`
+      : session?.role === 'tenant_owner'
+        ? `صاحب المولدة (${escapeHtml(session.username)})`
+        : `صاحب المولدة (${escapeHtml(tenant?.ownerName || 'المشغل المعتمد')})`;
+
+    const sessionTypeBadge = isSuperAdmin
+      ? '<span class="px-2.5 py-1 rounded-full text-[11px] font-black bg-purple-950 text-purple-300 border border-purple-800/60">مدير عام 🛡️</span>'
+      : '<span class="px-2.5 py-1 rounded-full text-[11px] font-black bg-cyan-950 text-cyan-300 border border-cyan-800/60">جلسة تشغيل نشطة ⚡</span>';
+
+    const securityCard = document.createElement('section');
+    securityCard.className = 'p-5 rounded-3xl bg-slate-900 border border-slate-800 shadow-xl space-y-4 text-xs';
+    securityCard.innerHTML = `
+      <div class="flex items-center justify-between gap-2 flex-wrap">
+        <div>
+          <h3 class="text-sm font-black text-white flex items-center gap-2">🔐 الأمان وإدارة الجلسة</h3>
+          <p class="text-slate-400 text-[11px] mt-0.5">التحكم في جلسة الاستخدام الحالية وقفل المنظومة</p>
+        </div>
+        ${sessionTypeBadge}
+      </div>
+
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+        <div class="p-3 rounded-xl bg-slate-800/60 border border-slate-700/60">
+          <span class="text-slate-400 block text-[10px]">المستخدم الحالي</span>
+          <span class="font-bold text-white">${sessionRoleLabel}</span>
+        </div>
+        <div class="p-3 rounded-xl bg-slate-800/60 border border-slate-700/60">
+          <span class="text-slate-400 block text-[10px]">المولدة النشطة</span>
+          <span class="font-bold text-cyan-300">${escapeHtml(tenant?.name || settings.generatorName)}</span>
+        </div>
+      </div>
+
+      <div class="pt-3 border-t border-slate-800 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+        <div>
+          <h4 class="font-bold text-slate-200">تسجيل الخروج من المنظومة</h4>
+          <p class="text-slate-400 text-[11px] mt-0.5">
+            إنهاء الجلسة الحالية وقفل لوحة التحكم للتبديل بين الحسابات أو منع الوصول غير المصرح به
+          </p>
+        </div>
+        <button type="button" id="logout-btn"
+          class="min-h-[44px] px-5 py-2.5 rounded-xl bg-rose-950/70 hover:bg-rose-900 text-rose-200 border border-rose-800/70 font-bold text-xs shadow-md transition active:scale-95 cursor-pointer flex items-center justify-center gap-2 shrink-0">
+          <span>تسجيل الخروج</span>
+          <span>🚪</span>
+        </button>
+      </div>
+    `;
+    root.appendChild(securityCard);
+
     this.container.appendChild(root);
     this.attachEventListeners();
   }
@@ -482,6 +535,21 @@ export class SettingsScreen {
       } finally {
         restoreInput.value = '';
       }
+    });
+
+    // 7. Logout button
+    const logoutBtn = document.getElementById('logout-btn');
+    logoutBtn?.addEventListener('click', () => {
+      const confirmed = confirm(
+        'هل أنت متأكد من تسجيل الخروج؟\n\nسيتم إنهاء الجلسة الحالية وقفل لوحة التحكم للتبديل أو الحماية.'
+      );
+      if (!confirmed) return;
+
+      authService.logout();
+      sessionStorage.clear();
+
+      // Navigate to login / lock screen
+      window.location.hash = '#login';
     });
   }
 
