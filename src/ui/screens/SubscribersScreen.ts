@@ -5,7 +5,8 @@
  */
 
 import { db } from '../../db/database.ts';
-import { licenseManager } from '../../license/license.ts';
+import { getEntitlement, entitlementLockMessage } from '../../services/entitlementService.ts';
+import { escapeHtml } from '../../utils/security.ts';
 import type { Subscriber, LineType, LineStatus } from '../../types/index.ts';
 
 export class SubscribersScreen {
@@ -155,7 +156,7 @@ export class SubscribersScreen {
         listEl.appendChild(this.createSubscriberCard(sub));
       }
     } catch (err: any) {
-      listEl.innerHTML = `<div class="p-4 rounded-xl bg-rose-950/40 border border-rose-800 text-rose-300 text-xs">خطأ: ${err.message}</div>`;
+      listEl.innerHTML = `<div class="p-4 rounded-xl bg-rose-950/40 border border-rose-800 text-rose-300 text-xs">خطأ: ${escapeHtml(err.message)}</div>`;
     }
   }
 
@@ -207,14 +208,14 @@ export class SubscribersScreen {
 
     if (sub.phone) {
       const phoneSpan = document.createElement('span');
-      phoneSpan.innerHTML = `📞 ${sub.phone}`;
+      phoneSpan.textContent = `📞 ${sub.phone}`;
       detailRow.appendChild(phoneSpan);
     }
 
     const addrParts = [sub.area, sub.neighborhood ? `م ${sub.neighborhood}` : '', sub.alley ? `ز ${sub.alley}` : '', sub.houseNumber ? `دار ${sub.houseNumber}` : ''].filter(Boolean);
     if (addrParts.length > 0) {
       const addrSpan = document.createElement('span');
-      addrSpan.innerHTML = `📍 ${addrParts.join(' / ')}`;
+      addrSpan.textContent = `📍 ${addrParts.join(' / ')}`;
       detailRow.appendChild(addrSpan);
     }
 
@@ -281,14 +282,11 @@ export class SubscribersScreen {
   private async openSubscriberModal(sub?: Subscriber): Promise<void> {
     this.editingSubscriber = sub || null;
 
-    // Check License / Trial status before allowing new additions
+    // Check license / subscription state before allowing new additions
     if (!sub) {
-      const settings = await db.getSettings();
-      const licStatus = await licenseManager.getStatus(settings);
-      if (!licStatus.canAddRecords) {
-        alert(
-          'انتهت الفترة التجريبية المجانية (30 يوماً). تم قفل إضافة مشتركين جدد. يمكنك استعراض كافة السجلات وطباعة الوصولات وتصدير البيانات في أي وقت. لتفعيل النظام يُرجى إدخال كود الترخيص من شاشة الإعدادات.'
-        );
+      const entitlement = await getEntitlement();
+      if (!entitlement.status.canAddRecords) {
+        alert(entitlementLockMessage(entitlement));
         return;
       }
     }
@@ -326,14 +324,14 @@ export class SubscribersScreen {
     form.innerHTML = `
       <div>
         <label class="block text-slate-300 font-bold mb-1">الاسم الكامل <span class="text-rose-400">*</span></label>
-        <input type="text" id="sub-name" required value="${sub?.fullName || ''}" placeholder="اسم المشترك الثلاثي"
+        <input type="text" id="sub-name" required value="${escapeHtml(sub?.fullName || '')}" placeholder="اسم المشترك الثلاثي"
           class="w-full min-h-[44px] px-3.5 py-2 rounded-xl bg-slate-800 border border-slate-700 text-slate-100 focus:border-cyan-500 focus:outline-none text-sm" />
       </div>
 
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
           <label class="block text-slate-300 font-bold mb-1">رقم الهاتف</label>
-          <input type="tel" id="sub-phone" value="${sub?.phone || ''}" placeholder="077XXXXXXXX"
+          <input type="tel" id="sub-phone" value="${escapeHtml(sub?.phone || '')}" placeholder="077XXXXXXXX"
             class="w-full min-h-[44px] px-3.5 py-2 rounded-xl bg-slate-800 border border-slate-700 text-slate-100 focus:border-cyan-500 focus:outline-none text-sm" />
         </div>
         <div>
@@ -366,22 +364,22 @@ export class SubscribersScreen {
       <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
         <div>
           <label class="block text-slate-400 mb-1">المنطقة</label>
-          <input type="text" id="sub-area" value="${sub?.area || ''}" placeholder="حي السلام"
+          <input type="text" id="sub-area" value="${escapeHtml(sub?.area || '')}" placeholder="حي السلام"
             class="w-full min-h-[40px] px-2.5 py-1.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-100 text-xs" />
         </div>
         <div>
           <label class="block text-slate-400 mb-1">المحلة</label>
-          <input type="text" id="sub-neighborhood" value="${sub?.neighborhood || ''}" placeholder="605"
+          <input type="text" id="sub-neighborhood" value="${escapeHtml(sub?.neighborhood || '')}" placeholder="605"
             class="w-full min-h-[40px] px-2.5 py-1.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-100 text-xs" />
         </div>
         <div>
           <label class="block text-slate-400 mb-1">الزقاق</label>
-          <input type="text" id="sub-alley" value="${sub?.alley || ''}" placeholder="12"
+          <input type="text" id="sub-alley" value="${escapeHtml(sub?.alley || '')}" placeholder="12"
             class="w-full min-h-[40px] px-2.5 py-1.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-100 text-xs" />
         </div>
         <div>
           <label class="block text-slate-400 mb-1">رقم الدار</label>
-          <input type="text" id="sub-house" value="${sub?.houseNumber || ''}" placeholder="8"
+          <input type="text" id="sub-house" value="${escapeHtml(sub?.houseNumber || '')}" placeholder="8"
             class="w-full min-h-[40px] px-2.5 py-1.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-100 text-xs" />
         </div>
       </div>
@@ -389,7 +387,7 @@ export class SubscribersScreen {
       <div>
         <label class="block text-slate-300 font-bold mb-1">ملاحظات إضافية</label>
         <textarea id="sub-notes" rows="2" placeholder="ملاحظات حول القاطع، الموقع، أو تفضيلات المشترك..."
-          class="w-full px-3.5 py-2 rounded-xl bg-slate-800 border border-slate-700 text-slate-100 text-xs focus:border-cyan-500 focus:outline-none">${sub?.notes || ''}</textarea>
+          class="w-full px-3.5 py-2 rounded-xl bg-slate-800 border border-slate-700 text-slate-100 text-xs focus:border-cyan-500 focus:outline-none">${escapeHtml(sub?.notes || '')}</textarea>
       </div>
 
       <div class="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-800">

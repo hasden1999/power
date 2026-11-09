@@ -5,10 +5,11 @@
  */
 
 import './index.css';
-import { platform, type PlatformInfo } from './platform.ts';
+import { platform } from './platform.ts';
 import { APP_CONFIG } from './config/app-config.ts';
 import { AR_INSTALL_TEXTS } from './config/install-texts.ts';
 import { db } from './db/database.ts';
+import { authService } from './services/authService.ts';
 import { BrowserWarningBanner } from './ui/components/BrowserWarningBanner.ts';
 import { InstallBanner } from './ui/components/InstallBanner.ts';
 import { BottomNav, type ScreenId } from './ui/components/BottomNav.ts';
@@ -18,7 +19,8 @@ import { ExpensesScreen } from './ui/screens/ExpensesScreen.ts';
 import { ReportsScreen } from './ui/screens/ReportsScreen.ts';
 import { SettingsScreen } from './ui/screens/SettingsScreen.ts';
 import { SaaSScreen } from './ui/screens/SaaSScreen.ts';
-import { registerTenantModal } from './ui/components/RegisterTenantModal.ts';
+
+const APP_SCREENS: ScreenId[] = ['subscribers', 'billing', 'expenses', 'reports', 'settings', 'saas'];
 
 // 1. Service Worker for PWA Offline Execution
 if ('serviceWorker' in navigator) {
@@ -52,7 +54,11 @@ class AmperejiApp {
   private currentScreen: ScreenId = 'subscribers';
   private screenContainer: HTMLElement | null = null;
   private bottomNav: BottomNav | null = null;
+  private headerActions: HTMLElement | null = null;
   private isSunlightMode = false;
+  private dbReady = false;
+  private navigationToken = 0;
+  private renderQueue: Promise<void> = Promise.resolve();
 
   constructor() {}
 
@@ -105,30 +111,149 @@ class AmperejiApp {
     installBanner.mount(root);
 
     // Mount bottom navigation
-    this.bottomNav = new BottomNav((screen) => this.navigateTo(screen));
+    this.bottomNav = new BottomNav((screen) => void this.navigateTo(screen));
     this.bottomNav.mount(root);
 
-    // Initialize Database
+    // Initialize Database and authentication
     try {
-      const dbInfo = await db.init();
+      let dbInfo: { isOpfs: boolean; version: string } | null = null;
+      let lastInitError: unknown = null;
+
+      // The SQLite worker can be slow on the very first cold load (WASM
+      // download + compile). Retry once before surfacing a fatal error.
+      for (let attempt = 1; attempt <= 2 && !dbInfo; attempt++) {
+        try {
+          dbInfo = await db.init();
+        } catch (err) {
+          lastInitError = err;
+          console.warn(`[Ampereji] Database init attempt ${attempt} failed:`, err);
+          if (attempt < 2) {
+            await new Promise((resolve) => setTimeout(resolve, 1200));
+          }
+        }
+      }
+
+      if (!dbInfo) throw lastInitError;
+
+      this.dbReady = true;
+      await authService.ensureDefaultAdmin();
+      await authService.validateSession();
+      await db.ensureActiveTenant();
+      await db.reconcileTenantStatuses();
       console.log('[Ampereji] Database ready:', dbInfo);
     } catch (err: any) {
       console.error('[Ampereji] Database init failed:', err);
+      this.renderStartupError(loadingBox, err);
+      return;
     }
 
-    // Remove loading and render initial screen
+    // Remove loading and render the route requested by the URL hash.
     loadingBox.remove();
-    await this.renderCurrentScreen();
+    await this.applyScreen(this.resolveScreenFromHash(), false);
 
-    // Listen for database reload events
+    this.bindGlobalEvents();
+  }
+
+  private bindGlobalEvents(): void {
+    window.addEventListener('hashchange', () => {
+      void this.applyScreen(this.resolveScreenFromHash(), false);
+    });
+
+    window.addEventListener('ampereji:navigate', (event: Event) => {
+      const screen = (event as CustomEvent<{ screen?: ScreenId }>).detail?.screen;
+      if (screen && APP_SCREENS.includes(screen)) {
+        void this.navigateTo(screen);
+      }
+    });
+
+    window.addEventListener('ampereji:auth-changed', () => {
+      this.updateHeaderActions();
+    });
+
     window.addEventListener('ampereji:db-reloaded', async () => {
-      await this.renderCurrentScreen();
+      // A restored database may not contain the current admin account.
+      authService.logout();
+      try {
+        await authService.ensureDefaultAdmin();
+        await db.ensureActiveTenant();
+        await db.reconcileTenantStatuses();
+      } catch (err) {
+        console.warn('[Ampereji] Post-restore refresh warning:', err);
+      }
+      await this.refreshCurrentScreen();
+    });
+
+    window.addEventListener('ampereji:tenant-changed', async () => {
+      if (this.currentScreen !== 'saas') {
+        await this.refreshCurrentScreen();
+      }
     });
 
     window.addEventListener('ampereji:demo-mode-activated', async () => {
       await db.init();
-      await this.renderCurrentScreen();
+      await this.refreshCurrentScreen();
     });
+  }
+
+  private resolveScreenFromHash(): ScreenId {
+    const raw = window.location.hash.replace(/^#\/?/, '').trim().toLowerCase();
+    switch (raw) {
+      case '': // fall through
+      case 'subscribers':
+      case 'المشتركون':
+        return 'subscribers';
+      case 'billing':
+        return 'billing';
+      case 'expenses':
+        return 'expenses';
+      case 'reports':
+        return 'reports';
+      case 'settings':
+        return 'settings';
+      case 'admin':
+      case 'login':
+      case 'saas':
+        return 'saas';
+      default:
+        return 'subscribers';
+    }
+  }
+
+  public async navigateTo(screen: ScreenId): Promise<void> {
+    if (!this.dbReady) return;
+
+    const desiredHash = screen === 'saas' ? '#admin' : `#${screen}`;
+    if (window.location.hash !== desiredHash) {
+      // The hashchange listener will apply the screen.
+      window.location.hash = desiredHash;
+      return;
+    }
+    await this.applyScreen(screen, false);
+  }
+
+  private async applyScreen(screen: ScreenId, updateHash: boolean = true): Promise<void> {
+    this.currentScreen = screen;
+    const token = ++this.navigationToken;
+    const isAdmin = screen === 'saas';
+
+    this.bottomNav?.setVisible(!isAdmin);
+    this.bottomNav?.setActive(isAdmin ? 'subscribers' : screen);
+
+    if (this.screenContainer) {
+      this.screenContainer.classList.toggle('pb-28', !isAdmin);
+      this.screenContainer.classList.toggle('pb-8', isAdmin);
+    }
+
+    if (updateHash) {
+      const desiredHash = isAdmin ? '#admin' : `#${screen}`;
+      if (window.location.hash !== desiredHash) {
+        window.history.replaceState(null, '', desiredHash);
+      }
+    }
+
+    this.updateHeaderActions();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    await this.renderCurrentScreen(token);
   }
 
   private buildHeader(): HTMLElement {
@@ -142,7 +267,7 @@ class AmperejiApp {
     // Logo & Brand
     const logoGroup = document.createElement('div');
     logoGroup.className = 'flex items-center gap-3 cursor-pointer';
-    logoGroup.addEventListener('click', () => this.navigateTo('subscribers'));
+    logoGroup.addEventListener('click', () => void this.navigateTo('subscribers'));
 
     const logoIcon = document.createElement('div');
     logoIcon.className =
@@ -167,30 +292,12 @@ class AmperejiApp {
     const rightCol = document.createElement('div');
     rightCol.className = 'flex items-center gap-1.5 sm:gap-2 text-xs flex-wrap justify-end';
 
-    // Register Generator Button
-    const regBtn = document.createElement('button');
-    regBtn.type = 'button';
-    regBtn.className =
-      'min-h-[40px] px-3 py-1.5 rounded-xl bg-cyan-900/60 hover:bg-cyan-800 text-cyan-200 border border-cyan-700/60 font-bold transition cursor-pointer flex items-center gap-1';
-    regBtn.innerHTML = '<span>➕ تسجيل مولدة</span>';
-    regBtn.title = 'تسجيل صاحب مولدة جديد في المنظومة';
-    regBtn.addEventListener('click', () => {
-      registerTenantModal.show(async () => {
-        await this.renderCurrentScreen();
-      });
-    });
-
-    // SaaS Super Admin Dashboard Button
-    const saasBtn = document.createElement('button');
-    saasBtn.type = 'button';
-    saasBtn.id = 'saas-admin-header-btn';
-    saasBtn.className =
-      'min-h-[40px] px-3 py-1.5 rounded-xl bg-purple-950/70 hover:bg-purple-900 text-purple-200 border border-purple-800/70 font-black transition cursor-pointer flex items-center gap-1 shadow-sm';
-    saasBtn.innerHTML = '<span>🏢 منصة SaaS</span>';
-    saasBtn.title = 'فتح لوحة تحكم منصة المولدات (Super Admin)';
-    saasBtn.addEventListener('click', () => {
-      this.navigateTo('saas');
-    });
+    // Admin actions are rendered dynamically. Regular users never see an
+    // "enter admin" button; the cockpit is reachable only via #admin / #login
+    // or through this return button while an admin session is active.
+    this.headerActions = document.createElement('div');
+    this.headerActions.id = 'header-dynamic-actions';
+    this.headerActions.className = 'flex items-center gap-1.5 sm:gap-2';
 
     // Sunlight High Contrast Toggle
     const sunBtn = document.createElement('button');
@@ -215,8 +322,7 @@ class AmperejiApp {
     }`;
     modeBadge.textContent = info.isStandalone ? 'تطبيق مثبت 📱' : 'متصفح ويب 🌐';
 
-    rightCol.appendChild(regBtn);
-    rightCol.appendChild(saasBtn);
+    rightCol.appendChild(this.headerActions);
     rightCol.appendChild(sunBtn);
     rightCol.appendChild(modeBadge);
 
@@ -226,37 +332,108 @@ class AmperejiApp {
     return header;
   }
 
-  public async navigateTo(screen: ScreenId): Promise<void> {
-    if (this.currentScreen === screen) return;
-    this.currentScreen = screen;
-    this.bottomNav?.setActive(screen);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-    await this.renderCurrentScreen();
+  private updateHeaderActions(): void {
+    if (!this.headerActions) return;
+    this.headerActions.innerHTML = '';
+
+    if (this.currentScreen === 'saas' || !authService.isSuperAdmin()) {
+      return;
+    }
+
+    const backBtn = document.createElement('button');
+    backBtn.type = 'button';
+    backBtn.id = 'saas-admin-back-btn';
+    backBtn.className =
+      'min-h-[40px] px-3 py-1.5 rounded-xl bg-purple-950/70 hover:bg-purple-900 text-purple-200 border border-purple-800/70 font-black transition cursor-pointer flex items-center gap-1 shadow-sm';
+    backBtn.innerHTML = '<span>🛡️ العودة للإدارة</span>';
+    backBtn.title = 'العودة إلى لوحة تحكم مدير المنصة';
+    backBtn.addEventListener('click', () => void this.navigateTo('saas'));
+    this.headerActions.appendChild(backBtn);
   }
 
-  private async renderCurrentScreen(): Promise<void> {
-    if (!this.screenContainer) return;
+  private refreshCurrentScreen(): Promise<void> {
+    return this.renderCurrentScreen(++this.navigationToken);
+  }
 
-    switch (this.currentScreen) {
-      case 'subscribers':
-        await new SubscribersScreen(this.screenContainer).render();
-        break;
-      case 'billing':
-        await new BillingScreen(this.screenContainer).render();
-        break;
-      case 'expenses':
-        await new ExpensesScreen(this.screenContainer).render();
-        break;
-      case 'reports':
-        await new ReportsScreen(this.screenContainer).render();
-        break;
-      case 'settings':
-        await new SettingsScreen(this.screenContainer).render();
-        break;
-      case 'saas':
-        await new SaaSScreen(this.screenContainer).render();
-        break;
-    }
+  private renderCurrentScreen(token: number): Promise<void> {
+    const container = this.screenContainer;
+    const screen = this.currentScreen;
+    if (!container || !this.dbReady) return Promise.resolve();
+
+    // Serialize screen renders: a fast tap sequence must never mount two
+    // screens on top of each other. The container is only cleared immediately
+    // before the winning screen starts rendering.
+    const run = this.renderQueue.then(async () => {
+      if (token !== this.navigationToken || screen !== this.currentScreen || !this.screenContainer) return;
+
+      const target = this.screenContainer;
+      target.replaceChildren();
+
+      switch (screen) {
+        case 'subscribers':
+          await new SubscribersScreen(target).render();
+          break;
+        case 'billing':
+          await new BillingScreen(target).render();
+          break;
+        case 'expenses':
+          await new ExpensesScreen(target).render();
+          break;
+        case 'reports':
+          await new ReportsScreen(target).render();
+          break;
+        case 'settings':
+          await new SettingsScreen(target).render();
+          break;
+        case 'saas':
+          await new SaaSScreen(target).render();
+          break;
+      }
+    });
+
+    this.renderQueue = run.catch((err) => {
+      console.error('[Ampereji] Screen render failed:', err);
+    });
+    return this.renderQueue;
+  }
+
+  private renderStartupError(container: HTMLElement, error: unknown): void {
+    const message = error instanceof Error ? error.message : String(error);
+    container.innerHTML = '';
+
+    const card = document.createElement('div');
+    card.className = 'max-w-lg mx-auto mt-10 p-6 rounded-3xl bg-rose-950/40 border border-rose-800 text-center space-y-3';
+
+    const icon = document.createElement('div');
+    icon.className = 'text-4xl';
+    icon.textContent = '⚠️';
+
+    const title = document.createElement('h2');
+    title.className = 'text-base font-black text-rose-200';
+    title.textContent = 'تعذر تشغيل قاعدة البيانات المحلية';
+
+    const detail = document.createElement('p');
+    detail.className = 'text-xs text-rose-300 leading-relaxed break-words';
+    detail.textContent = message;
+
+    const hint = document.createElement('p');
+    hint.className = 'text-[11px] text-slate-400 leading-relaxed';
+    hint.textContent =
+      'تأكد من فتح التطبيق عبر HTTPS أو localhost، ومن توفر مساحة تخزين كافية. إذا استمرت المشكلة فأعد تحميل الصفحة.';
+
+    const reload = document.createElement('button');
+    reload.type = 'button';
+    reload.className =
+      'min-h-[44px] px-5 py-2 rounded-xl bg-rose-700 hover:bg-rose-600 text-white font-bold text-sm cursor-pointer';
+    reload.textContent = 'إعادة المحاولة';
+    reload.addEventListener('click', () => window.location.reload());
+
+    card.appendChild(icon);
+    card.appendChild(title);
+    card.appendChild(detail);
+    card.appendChild(hint);
+    card.appendChild(reload);
+    container.appendChild(card);
   }
 }
 

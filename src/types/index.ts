@@ -11,6 +11,18 @@ export type ExpenseType = 'وقود' | 'زيت_وفلاتر' | 'صيانة' | '�
 
 export type TenantPlan = 'trial' | 'monthly' | 'yearly';
 export type TenantStatus = 'active' | 'trial' | 'expired' | 'blocked' | 'pending';
+export type AuthRole = 'super_admin' | 'tenant_owner';
+
+export interface AuthUser {
+  id: string;
+  username: string;
+  role: AuthRole;
+  tenantId: string | null;
+  isActive: boolean;
+  lastLogin: string;
+  createdAt: string;
+  updatedAt: string;
+}
 
 export interface Tenant {
   id: string;
@@ -63,6 +75,11 @@ export interface Subscriber {
   tenantId?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface AdminSubscriberView extends Subscriber {
+  tenantName?: string;
+  tenantOwner?: string;
 }
 
 export interface BillingRecord {

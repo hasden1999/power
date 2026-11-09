@@ -6,6 +6,7 @@
 
 import { db } from '../../db/database.ts';
 import { backupManager } from '../../backup/backup.ts';
+import { escapeHtml } from '../../utils/security.ts';
 import type { MonthlyReport, AppSettings } from '../../types/index.ts';
 
 export class ReportsScreen {
@@ -148,26 +149,32 @@ export class ReportsScreen {
     reportEl.innerHTML = '<div class="text-center py-8 text-slate-400 text-xs">جاري تجهيز التقرير المالي...</div>';
 
     try {
-      this.report = await db.getMonthlyReport(this.currentYear, this.currentMonth);
-      const bills = await db.getBillingRecords(this.currentYear, this.currentMonth, '', 'غير مسدد');
-      const partialBills = await db.getBillingRecords(this.currentYear, this.currentMonth, '', 'متبقي');
-      const unpaidBills = [...bills, ...partialBills];
+      const [report, outstandingDebt, outstandingBills] = await Promise.all([
+        db.getMonthlyReport(this.currentYear, this.currentMonth),
+        db.getOutstandingDebt(),
+        db.getOutstandingBills(),
+      ]);
+      this.report = report;
 
-      const curr = this.settings?.currency || 'د.ع';
+      const currency = escapeHtml(this.settings?.currency || 'د.ع');
+      const format = (value: number): string =>
+        (Number.isFinite(Number(value)) ? Number(value) : 0).toLocaleString('ar-IQ');
 
       reportEl.innerHTML = `
         <!-- Net Profit Hero Box -->
         <div class="p-6 rounded-3xl bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900 border ${
-          this.report.netProfit >= 0 ? 'border-emerald-600/40' : 'border-rose-600/40'
+          report.netProfit >= 0 ? 'border-emerald-600/40' : 'border-rose-600/40'
         } shadow-xl text-center relative overflow-hidden">
           <div class="text-xs font-bold text-slate-400 mb-1">صافي الأرباح لشهر ${this.currentMonth} / ${this.currentYear}</div>
           <div class="text-3xl sm:text-4xl font-black ${
-            this.report.netProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'
+            report.netProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'
           } mb-2">
-            ${this.report.netProfit.toLocaleString('ar-IQ')} ${curr}
+            ${format(report.netProfit)} ${currency}
           </div>
           <p class="text-xs text-slate-400">
-            صافي الربح = المقبوضات النقدية المحصلة (${this.report.totalCollected.toLocaleString('ar-IQ')} ${curr}) - إجمالي المصاريف (${this.report.totalExpenses.toLocaleString('ar-IQ')} ${curr})
+            صافي الربح = المقبوضات النقدية المحصلة (${format(report.totalCollected)} ${currency}) - إجمالي المصاريف (${format(
+              report.totalExpenses
+            )} ${currency})
           </p>
         </div>
 
@@ -175,26 +182,28 @@ export class ReportsScreen {
         <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
           <div class="p-4 rounded-2xl bg-slate-900 border border-slate-800">
             <span class="text-slate-400 block text-[11px] mb-1">إجمالي المستحق (القوائم)</span>
-            <span class="text-base font-black text-white">${this.report.totalDue.toLocaleString('ar-IQ')}</span>
-            <span class="text-[10px] text-slate-500 block">${curr}</span>
+            <span class="text-base font-black text-white">${format(report.totalDue)}</span>
+            <span class="text-[10px] text-slate-500 block">${currency} — لهذا الشهر</span>
           </div>
 
           <div class="p-4 rounded-2xl bg-slate-900 border border-slate-800">
             <span class="text-emerald-400 block text-[11px] mb-1">المبالغ المحصلة فعلياً</span>
-            <span class="text-base font-black text-emerald-400">${this.report.totalCollected.toLocaleString('ar-IQ')}</span>
-            <span class="text-[10px] text-emerald-600 block">${curr}</span>
+            <span class="text-base font-black text-emerald-400">${format(report.totalCollected)}</span>
+            <span class="text-[10px] text-emerald-600 block">${currency} — لهذا الشهر</span>
           </div>
 
           <div class="p-4 rounded-2xl bg-slate-900 border border-slate-800">
-            <span class="text-rose-400 block text-[11px] mb-1">الديون غير المسددة</span>
-            <span class="text-base font-black text-rose-400">${this.report.totalDebt.toLocaleString('ar-IQ')}</span>
-            <span class="text-[10px] text-rose-600 block">${curr}</span>
+            <span class="text-rose-400 block text-[11px] mb-1">الديون التراكمية</span>
+            <span class="text-base font-black text-rose-400">${format(outstandingDebt)}</span>
+            <span class="text-[10px] text-rose-600 block">${currency} — ديون هذا الشهر: ${format(
+              report.totalDebt
+            )}</span>
           </div>
 
           <div class="p-4 rounded-2xl bg-slate-900 border border-slate-800">
             <span class="text-amber-400 block text-[11px] mb-1">إجمالي المصاريف</span>
-            <span class="text-base font-black text-amber-400">${this.report.totalExpenses.toLocaleString('ar-IQ')}</span>
-            <span class="text-[10px] text-amber-600 block">${curr}</span>
+            <span class="text-base font-black text-amber-400">${format(report.totalExpenses)}</span>
+            <span class="text-[10px] text-amber-600 block">${currency} — لهذا الشهر</span>
           </div>
         </div>
 
@@ -204,29 +213,33 @@ export class ReportsScreen {
           <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 text-center">
             <div class="p-3 rounded-xl bg-slate-800/60">
               <span class="text-slate-400 block text-[10px]">استهلاك الكاز (الديزل)</span>
-              <span class="text-sm font-black text-amber-400">${this.report.fuelLiters.toLocaleString('ar-IQ')} لتر</span>
+              <span class="text-sm font-black text-amber-400">${format(report.fuelLiters)} لتر</span>
             </div>
             <div class="p-3 rounded-xl bg-slate-800/60">
               <span class="text-slate-400 block text-[10px]">تكلفة الوقود</span>
-              <span class="text-sm font-black text-amber-400">${this.report.fuelExpenses.toLocaleString('ar-IQ')} ${curr}</span>
+              <span class="text-sm font-black text-amber-400">${format(report.fuelExpenses)} ${currency}</span>
             </div>
             <div class="p-3 rounded-xl bg-slate-800/60">
               <span class="text-slate-400 block text-[10px]">مجموع الأمبيرات المغذاة</span>
-              <span class="text-sm font-black text-cyan-400">${this.report.totalAmperes.toFixed(1)} أمبير (${this.report.activeSubscribers} مشترك)</span>
+              <span class="text-sm font-black text-cyan-400">${report.totalAmperes.toFixed(1)} أمبير (${
+                report.activeSubscribers
+              } مشترك)</span>
             </div>
           </div>
         </div>
 
-        <!-- Unpaid Debts List -->
+        <!-- Cumulative Outstanding Debts List -->
         <div class="p-4 rounded-2xl bg-slate-900 border border-slate-800 space-y-3 text-xs">
-          <div class="flex items-center justify-between">
-            <h4 class="font-black text-rose-400 text-sm">⚠️ قائمة الديون غير المسددة (${unpaidBills.length} مشترك)</h4>
-            <span class="text-slate-400 text-[11px]">مجموع الديون: <strong class="text-rose-400">${this.report.totalDebt.toLocaleString('ar-IQ')}</strong> ${curr}</span>
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <h4 class="font-black text-rose-400 text-sm">⚠️ قائمة الديون التراكمية (${outstandingBills.length} فاتورة غير مسددة)</h4>
+            <span class="text-slate-400 text-[11px]">مجموع الديون: <strong class="text-rose-400">${format(
+              outstandingDebt
+            )}</strong> ${currency}</span>
           </div>
 
           ${
-            unpaidBills.length === 0
-              ? '<div class="text-center py-6 text-emerald-400 font-bold">🎉 تهانينا! تم تسديد كامل قوائم هذا الشهر ولا توجد ديون متبقية.</div>'
+            outstandingBills.length === 0
+              ? '<div class="text-center py-6 text-emerald-400 font-bold">🎉 تهانينا! لا توجد أي ديون متراكمة على المشتركين.</div>'
               : `
               <div class="overflow-x-auto">
                 <table class="w-full text-right border-collapse">
@@ -234,6 +247,7 @@ export class ReportsScreen {
                     <tr class="border-b border-slate-800 text-slate-400 text-[11px]">
                       <th class="py-2">المشترك</th>
                       <th class="py-2">الهاتف</th>
+                      <th class="py-2">الشهر</th>
                       <th class="py-2">الأمبيرية</th>
                       <th class="py-2">المستحق</th>
                       <th class="py-2">المسدد</th>
@@ -242,19 +256,20 @@ export class ReportsScreen {
                     </tr>
                   </thead>
                   <tbody class="divide-y divide-slate-800/60 text-slate-200">
-                    ${unpaidBills
+                    ${outstandingBills
                       .map(
-                        (b) => `
+                        (bill) => `
                       <tr class="hover:bg-slate-800/40">
-                        <td class="py-2.5 font-bold">${b.subscriberName}</td>
-                        <td class="py-2.5">${b.phone || '-'}</td>
-                        <td class="py-2.5">${b.amperes || 0}</td>
-                        <td class="py-2.5">${b.totalDue.toLocaleString('ar-IQ')}</td>
-                        <td class="py-2.5 text-emerald-400">${b.totalPaid.toLocaleString('ar-IQ')}</td>
-                        <td class="py-2.5 font-bold text-rose-400">${b.remaining.toLocaleString('ar-IQ')}</td>
+                        <td class="py-2.5 font-bold">${escapeHtml(bill.subscriberName || 'غير معروف')}</td>
+                        <td class="py-2.5">${escapeHtml(bill.phone || '-')}</td>
+                        <td class="py-2.5">${bill.month}/${bill.year}</td>
+                        <td class="py-2.5">${escapeHtml(bill.amperes || 0)}</td>
+                        <td class="py-2.5">${format(bill.totalDue)}</td>
+                        <td class="py-2.5 text-emerald-400">${format(bill.totalPaid)}</td>
+                        <td class="py-2.5 font-bold text-rose-400">${format(bill.remaining)}</td>
                         <td class="py-2.5"><span class="px-2 py-0.5 rounded text-[10px] font-bold ${
-                          b.status === 'متبقي' ? 'bg-amber-950 text-amber-300' : 'bg-rose-950 text-rose-300'
-                        }">${b.status}</span></td>
+                          bill.status === 'متبقي' ? 'bg-amber-950 text-amber-300' : 'bg-rose-950 text-rose-300'
+                        }">${escapeHtml(bill.status)}</span></td>
                       </tr>
                     `
                       )
@@ -267,7 +282,9 @@ export class ReportsScreen {
         </div>
       `;
     } catch (err: any) {
-      reportEl.innerHTML = `<div class="p-4 rounded-xl bg-rose-950/40 border border-rose-800 text-rose-300 text-xs">خطأ: ${err.message}</div>`;
+      reportEl.innerHTML = `<div class="p-4 rounded-xl bg-rose-950/40 border border-rose-800 text-rose-300 text-xs">خطأ: ${escapeHtml(
+        err?.message || err
+      )}</div>`;
     }
   }
 }

@@ -5,7 +5,10 @@
  *
  * Usage:
  *   node tools/generate-license.js generate-keys
- *   node tools/generate-license.js issue --name "مولدة القدس الأهلية" --phone "07701234567" --days 365
+ *   node tools/generate-license.js issue --name "مولدة القدس الأهلية" --phone "07701234567" --type yearly
+ *
+ * SECURITY: license-keys.json contains the private signing key. Keep it
+ * outside version control and never include it in the web build.
  */
 
 import crypto from 'node:crypto';
@@ -34,10 +37,21 @@ function generateKeys() {
     createdAt: new Date().toISOString(),
   };
 
-  fs.writeFileSync(KEYS_FILE, JSON.stringify(keysData, null, 2), 'utf-8');
+  fs.writeFileSync(KEYS_FILE, JSON.stringify(keysData, null, 2), { encoding: 'utf-8', mode: 0o600 });
   console.log(` Keys successfully saved to: ${KEYS_FILE}`);
+  console.log(' IMPORTANT: this file is a secret. It is ignored by git and must never be shipped in dist/.');
   console.log('\n=== Embed this public JWK into src/license/license.ts ===\n');
   console.log(JSON.stringify(jwkPublic, null, 2));
+}
+
+// Command: Show the public JWK from the existing key file
+function showPublicKey() {
+  if (!fs.existsSync(KEYS_FILE)) {
+    console.error(' Keys file not found! Run: node tools/generate-license.js generate-keys');
+    process.exit(1);
+  }
+  const keys = JSON.parse(fs.readFileSync(KEYS_FILE, 'utf-8'));
+  console.log(JSON.stringify(keys.publicJwk, null, 2));
 }
 
 // Command: Issue License
@@ -94,26 +108,42 @@ const command = args[0];
 
 if (command === 'generate-keys') {
   generateKeys();
+} else if (command === 'show-public') {
+  showPublicKey();
 } else if (command === 'issue') {
-  let name = 'مولدة حي السلام الأهلية';
-  let phone = '07701234567';
+  let name = 'مولدتي الأهلية';
+  let phone = '';
   let days = 365;
+  let type = 'yearly';
 
   for (let i = 1; i < args.length; i++) {
     if (args[i] === '--name' && args[i + 1]) name = args[i + 1];
     if (args[i] === '--phone' && args[i + 1]) phone = args[i + 1];
     if (args[i] === '--days' && args[i + 1]) days = parseInt(args[i + 1], 10);
+    if (args[i] === '--type' && args[i + 1]) type = args[i + 1];
   }
 
-  issueLicense(name, phone, days);
+  if (type === 'monthly') days = 30;
+  if (type === 'lifetime') days = 0;
+  if (!Number.isFinite(days) || days < 0) {
+    console.error(' Invalid --days value');
+    process.exit(1);
+  }
+
+  issueLicense(name, phone, days, type);
 } else {
   console.log(`
 استخدام سكربت إصدار التراخيص لمنظومة أمبيرجي:
 
-1. توليد زوج المفاتيح (مرة واحدة):
+1. توليد زوج المفاتيح (مرة واحدة فقط، ويُحفظ الملف الخاص محلياً):
    node tools/generate-license.js generate-keys
 
-2. إصدار كود ترخيص لمولدة معينة:
-   node tools/generate-license.js issue --name "مولدة النور" --phone "07700000000" --days 365
+2. عرض المفتاح العام الحالي (للتأكد من مطابقته للتطبيق):
+   node tools/generate-license.js show-public
+
+3. إصدار كود ترخيص لمولدة معينة:
+   node tools/generate-license.js issue --name "مولدة النور" --phone "07700000000" --type yearly
+   node tools/generate-license.js issue --name "مولدة النور" --phone "07700000000" --type monthly
+   node tools/generate-license.js issue --name "مولدة النور" --phone "07700000000" --type lifetime
 `);
 }

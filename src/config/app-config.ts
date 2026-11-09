@@ -12,6 +12,12 @@ export const APP_CONFIG = {
   trialDays: 30,
   installSnoozeDays: 3,
 
+  plans: {
+    trial: { label: 'فترة تجريبية', days: 30, price: 0 },
+    monthly: { label: 'اشتراك شهري', days: 30, price: 15000 },
+    yearly: { label: 'اشتراك سنوي', days: 365, price: 150000 },
+  },
+
   storageKeys: {
     installSnoozeUntil: 'ampereji_install_snooze_until',
     demoMode: 'ampereji_demo_mode',

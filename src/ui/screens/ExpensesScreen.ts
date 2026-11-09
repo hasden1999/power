@@ -5,7 +5,8 @@
  */
 
 import { db } from '../../db/database.ts';
-import { licenseManager } from '../../license/license.ts';
+import { getEntitlement, entitlementLockMessage } from '../../services/entitlementService.ts';
+import { escapeHtml } from '../../utils/security.ts';
 import type { Expense, ExpenseType, AppSettings } from '../../types/index.ts';
 
 export class ExpensesScreen {
@@ -138,7 +139,7 @@ export class ExpensesScreen {
         const fuelLiters = this.expenses
           .filter((e) => e.expenseType === 'وقود' && e.fuelLiters)
           .reduce((sum, e) => sum + (e.fuelLiters || 0), 0);
-        const curr = this.settings?.currency || 'د.ع';
+        const curr = escapeHtml(this.settings?.currency || 'د.ع');
 
         statsEl.innerHTML = `
           <div class="p-3 rounded-2xl bg-slate-900 border border-slate-800">
@@ -168,7 +169,7 @@ export class ExpensesScreen {
         listEl.appendChild(this.createExpenseCard(exp));
       }
     } catch (err: any) {
-      listEl.innerHTML = `<div class="p-4 rounded-xl bg-rose-950/40 border border-rose-800 text-rose-300 text-xs">خطأ: ${err.message}</div>`;
+      listEl.innerHTML = `<div class="p-4 rounded-xl bg-rose-950/40 border border-rose-800 text-rose-300 text-xs">خطأ: ${escapeHtml(err.message)}</div>`;
     }
   }
 
@@ -209,8 +210,8 @@ export class ExpensesScreen {
     const subRow = document.createElement('div');
     subRow.className = 'flex items-center gap-3 text-slate-400 text-[11px]';
     subRow.innerHTML = `
-      <span>📅 ${exp.expenseDate}</span>
-      ${exp.notes ? `<span class="text-slate-500 italic">📝 ${exp.notes}</span>` : ''}
+      <span>📅 ${escapeHtml(exp.expenseDate)}</span>
+      ${exp.notes ? `<span class="text-slate-500 italic">📝 ${escapeHtml(exp.notes)}</span>` : ''}
     `;
     infoCol.appendChild(subRow);
     card.appendChild(infoCol);
@@ -244,14 +245,13 @@ export class ExpensesScreen {
   }
 
   private async openExpenseModal(): Promise<void> {
-    const settings = await db.getSettings();
-    const licStatus = await licenseManager.getStatus(settings);
-    if (!licStatus.canAddRecords) {
-      alert(
-        'انتهت الفترة التجريبية المجانية (30 يوماً). تم قفل تسجيل مصاريف جديدة. يمكنك استعراض كافة السجلات وتصدير التقارير في أي وقت. لتفعيل النظام يُرجى إدخال كود الترخيص من شاشة الإعدادات.'
-      );
+    const entitlement = await getEntitlement();
+    if (!entitlement.status.canAddRecords) {
+      alert(entitlementLockMessage(entitlement));
       return;
     }
+
+    const settings = await db.getSettings();
 
     this.closeModal();
 
@@ -281,7 +281,7 @@ export class ExpensesScreen {
     card.appendChild(header);
 
     const todayStr = new Date().toISOString().split('T')[0];
-    const curr = settings.currency || 'د.ع';
+    const curr = escapeHtml(settings.currency || 'د.ع');
 
     const form = document.createElement('form');
     form.className = 'space-y-3.5 text-xs';

@@ -6,7 +6,8 @@
 
 import { db } from '../../db/database.ts';
 import { thermalReceiptModal } from '../components/ThermalReceiptModal.ts';
-import { licenseManager } from '../../license/license.ts';
+import { getEntitlement, entitlementLockMessage } from '../../services/entitlementService.ts';
+import { escapeHtml } from '../../utils/security.ts';
 import type { BillingRecord, AppSettings, BillStatus } from '../../types/index.ts';
 
 export class BillingScreen {
@@ -181,7 +182,7 @@ export class BillingScreen {
         const totalDue = this.bills.reduce((sum, b) => sum + b.totalDue, 0);
         const totalPaid = this.bills.reduce((sum, b) => sum + b.totalPaid, 0);
         const totalDebt = this.bills.reduce((sum, b) => sum + b.remaining, 0);
-        const curr = this.settings?.currency || 'د.ع';
+        const curr = escapeHtml(this.settings?.currency || 'د.ع');
 
         statsEl.innerHTML = `
           <div class="p-2.5 rounded-xl bg-slate-900 border border-slate-800">
@@ -222,7 +223,7 @@ export class BillingScreen {
         listEl.appendChild(this.createBillCard(bill));
       }
     } catch (err: any) {
-      listEl.innerHTML = `<div class="p-4 rounded-xl bg-rose-950/40 border border-rose-800 text-rose-300 text-xs">خطأ: ${err.message}</div>`;
+      listEl.innerHTML = `<div class="p-4 rounded-xl bg-rose-950/40 border border-rose-800 text-rose-300 text-xs">خطأ: ${escapeHtml(err.message)}</div>`;
     }
   }
 
@@ -263,7 +264,7 @@ export class BillingScreen {
     infoCol.appendChild(topRow);
 
     // Financial breakdown
-    const curr = this.settings?.currency || 'د.ع';
+    const curr = escapeHtml(this.settings?.currency || 'د.ع');
     const numRow = document.createElement('div');
     numRow.className = 'flex items-center gap-4 text-[11px] flex-wrap';
 
@@ -307,26 +308,108 @@ export class BillingScreen {
   }
 
   private async generateBillsForMonth(): Promise<void> {
-    const defaultPrice = this.settings?.defaultAmperePrice || 12000;
-    const pricePrompt = prompt(
-      `أدخل سعر الأمبير لشهر ${this.currentMonth} / ${this.currentYear} بالدينار العراقي:`,
-      defaultPrice.toString()
-    );
-
-    if (!pricePrompt) return;
-    const price = parseFloat(pricePrompt);
-    if (isNaN(price) || price <= 0) {
-      alert('يرجى إدخال سعر صحيح للأمبير');
+    const entitlement = await getEntitlement();
+    if (!entitlement.status.canAddRecords) {
+      alert(entitlementLockMessage(entitlement));
       return;
     }
 
-    try {
-      const count = await db.generateMonthlyBills(this.currentYear, this.currentMonth, price);
-      alert(`تم بنجاح إصدار وتوليد ${count} قائمة لشهر ${this.currentMonth} / ${this.currentYear}!`);
-      await this.loadBills();
-    } catch (err: any) {
-      alert(`فشل التوليد: ${err.message}`);
-    }
+    this.openGenerateBillsModal();
+  }
+
+  private openGenerateBillsModal(): void {
+    this.closeModal();
+
+    this.modalElement = document.createElement('div');
+    this.modalElement.className =
+      'fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm';
+
+    const card = document.createElement('div');
+    card.className =
+      'w-full max-w-md rounded-3xl bg-slate-900 border border-slate-700 p-6 shadow-2xl text-slate-100 flex flex-col gap-4';
+
+    const header = document.createElement('div');
+    header.className = 'flex items-center justify-between border-b border-slate-800 pb-3';
+
+    const title = document.createElement('h3');
+    title.className = 'text-base font-black text-cyan-400';
+    title.textContent = `⚡ توليد قوائم شهر ${this.currentMonth} / ${this.currentYear}`;
+
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'text-slate-400 hover:text-white p-1 text-xl leading-none cursor-pointer';
+    closeBtn.innerHTML = '&times;';
+    closeBtn.addEventListener('click', () => this.closeModal());
+
+    header.appendChild(title);
+    header.appendChild(closeBtn);
+    card.appendChild(header);
+
+    const curr = escapeHtml(this.settings?.currency || 'د.ع');
+    const defaultPrice = this.settings?.defaultAmperePrice || 12000;
+
+    const form = document.createElement('form');
+    form.className = 'space-y-3.5 text-xs';
+    form.innerHTML = `
+      <p class="text-slate-300 leading-relaxed">
+        سيتم إصدار قوائم الشهر لجميع المشتركين النشطين حسب عدد الأمبيرات المسجلة لكل مشترك.
+      </p>
+
+      <div>
+        <label class="block text-slate-300 font-bold mb-1">سعر الأمبير لهذا الشهر (${curr}) <span class="text-rose-400">*</span></label>
+        <input type="number" id="gen-price" min="1" step="1" required value="${defaultPrice}"
+          class="w-full min-h-[44px] px-3.5 py-2 rounded-xl bg-slate-800 border border-slate-700 text-slate-100 text-base font-bold text-cyan-300 focus:border-cyan-500 focus:outline-none" />
+      </div>
+
+      <div id="gen-error" class="hidden p-2.5 rounded-lg bg-rose-950/60 border border-rose-800 text-rose-300 text-[11px]"></div>
+
+      <div class="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-800">
+        <button type="button" id="gen-cancel-btn"
+          class="min-h-[44px] px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold cursor-pointer">
+          إلغاء
+        </button>
+        <button type="submit" id="gen-submit-btn"
+          class="min-h-[44px] px-6 py-2 rounded-xl bg-[#0E7490] hover:bg-cyan-600 text-white font-bold shadow-lg transition active:scale-95 cursor-pointer">
+          توليد القوائم الآن
+        </button>
+      </div>
+    `;
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const priceInput = form.querySelector('#gen-price') as HTMLInputElement;
+      const errorBox = form.querySelector('#gen-error') as HTMLElement;
+      const submitBtn = form.querySelector('#gen-submit-btn') as HTMLButtonElement;
+      const price = parseFloat(priceInput.value);
+
+      if (isNaN(price) || price <= 0) {
+        errorBox.textContent = 'يرجى إدخال سعر صحيح للأمبير (أكبر من صفر).';
+        errorBox.classList.remove('hidden');
+        priceInput.focus();
+        return;
+      }
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'جاري التوليد…';
+
+      try {
+        const count = await db.generateMonthlyBills(this.currentYear, this.currentMonth, price);
+        this.closeModal();
+        await this.loadBills();
+        alert(`تم بنجاح إصدار وتوليد ${count} قائمة لشهر ${this.currentMonth} / ${this.currentYear}!`);
+      } catch (err: any) {
+        errorBox.textContent = `فشل التوليد: ${err.message}`;
+        errorBox.classList.remove('hidden');
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'توليد القوائم الآن';
+      }
+    });
+
+    form.querySelector('#gen-cancel-btn')?.addEventListener('click', () => this.closeModal());
+
+    card.appendChild(form);
+    this.modalElement.appendChild(card);
+    document.body.appendChild(this.modalElement);
   }
 
   private openPaymentModal(bill: BillingRecord): void {
@@ -357,7 +440,7 @@ export class BillingScreen {
     header.appendChild(closeBtn);
     card.appendChild(header);
 
-    const curr = this.settings?.currency || 'د.ع';
+    const curr = escapeHtml(this.settings?.currency || 'د.ع');
 
     const form = document.createElement('form');
     form.className = 'space-y-3.5 text-xs';

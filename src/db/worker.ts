@@ -5,7 +5,7 @@
  */
 
 import sqlite3InitModule, { type Sqlite3Static } from '@sqlite.org/sqlite-wasm';
-import { SCHEMA_SQL, DEFAULT_SETTINGS, SAMPLE_SUBSCRIBERS, SAMPLE_TENANTS } from './schema.ts';
+import { SCHEMA_SQL, INDEXES_SQL, DEFAULT_SETTINGS } from './schema.ts';
 
 let sqlite3: Sqlite3Static | null = null;
 let db: any = null;
@@ -71,74 +71,139 @@ async function initDatabase(useOpfs: boolean): Promise<{ isOpfs: boolean; versio
   db.exec('PRAGMA foreign_keys = ON;');
   db.exec('PRAGMA journal_mode = WAL;');
 
-  // Initialize schema
-  db.exec(SCHEMA_SQL);
-
-  // Check and seed default settings if empty
-  const settingsCount = getOneRow('SELECT COUNT(*) as count FROM settings', []);
-  if (!settingsCount || settingsCount.count === 0) {
-    for (const [key, val] of Object.entries(DEFAULT_SETTINGS)) {
-      db.exec({
-        sql: 'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)',
-        bind: [key, val],
-      });
-    }
-
-    // Seed sample subscribers if table is brand new
-    for (const sub of SAMPLE_SUBSCRIBERS) {
-      db.exec({
-        sql: `INSERT OR IGNORE INTO subscribers (id, full_name, phone, area, neighborhood, alley, house_number, amperes, line_type, line_status, notes)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        bind: [
-          sub.id,
-          sub.full_name,
-          sub.phone,
-          sub.area,
-          sub.neighborhood,
-          sub.alley,
-          sub.house_number,
-          sub.amperes,
-          sub.line_type,
-          sub.line_status,
-          sub.notes,
-        ],
-      });
-    }
-  }
-
-  // Seed sample tenants if empty
-  try {
-    const tenantsCount = getOneRow('SELECT COUNT(*) as count FROM tenants', []);
-    if (!tenantsCount || tenantsCount.count === 0) {
-      for (const t of SAMPLE_TENANTS) {
-        db.exec({
-          sql: `INSERT OR IGNORE INTO tenants (id, name, owner_name, phone, address, plan, plan_price, status, expires_at, is_blocked, license_key, default_price)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          bind: [
-            t.id,
-            t.name,
-            t.owner_name,
-            t.phone,
-            t.address,
-            t.plan,
-            t.plan_price,
-            t.status,
-            t.expires_at,
-            t.is_blocked,
-            t.license_key,
-            t.default_price,
-          ],
-        });
-      }
-    }
-  } catch (err) {
-    console.warn('[SQLiteWorker] Tenants seeding warning:', err);
-  }
+  initializeSchema();
 
   return {
     isOpfs: isOpfsActive,
     version: sqlite3.version.libVersion,
   };
+}
+
+/**
+ * Create missing tables/columns/indexes and repair rows from older builds.
+ *
+ * This runs both at startup and after importing a backup, so restoring a
+ * database produced by an older release cannot leave the app without the
+ * tables or columns the current build expects.
+ */
+function initializeSchema(): void {
+  // Initialize tables first so old databases receive new tables as well.
+  db.exec(SCHEMA_SQL);
+
+  // Auto-migration for databases created by older builds.
+  const subscribersHadTenant = ensureColumn('subscribers', 'tenant_id', "TEXT DEFAULT 'tenant-default'");
+  const billingHadTenant = ensureColumn('billing', 'tenant_id', "TEXT DEFAULT 'tenant-default'");
+  const expensesHadTenant = ensureColumn('expenses', 'tenant_id', "TEXT DEFAULT 'tenant-default'");
+  ensureColumn('tenants', 'default_price', 'REAL DEFAULT 12000');
+  ensureColumn('tenants', 'license_key', "TEXT DEFAULT ''");
+
+  // Very old billing tables may predate the stored remainder column.
+  const billingHadRemaining = ensureColumn('billing', 'remaining', 'REAL DEFAULT 0');
+  ensureColumn('billing', 'payment_date', 'TEXT');
+  if (billingHadRemaining) {
+    db.exec('UPDATE billing SET remaining = MAX(COALESCE(total_due, 0) - COALESCE(total_paid, 0), 0)');
+  }
+
+  // Indexes run only after the migration above guarantees their columns exist.
+  db.exec(INDEXES_SQL);
+
+  // Seed every missing settings key without overwriting user values.
+  for (const [key, val] of Object.entries(DEFAULT_SETTINGS)) {
+    db.exec({
+      sql: 'INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)',
+      bind: [key, val],
+    });
+  }
+
+  // A fresh installation always has exactly one local tenant workspace.
+  // On upgrades, the legacy settings profile becomes that workspace so the
+  // owner keeps the generator name, phone, price and license they already had.
+  try {
+    const tenantsCount = getOneRow('SELECT COUNT(*) as count FROM tenants', []);
+    if (!tenantsCount || tenantsCount.count === 0) {
+      const settings = getSettingsMap();
+      const trialStart = new Date(settings.trial_start_date || Date.now()).getTime();
+      const safeTrialStart = Number.isFinite(trialStart) ? trialStart : Date.now();
+      const expiresAt = new Date(safeTrialStart + 30 * 24 * 60 * 60 * 1000).toISOString();
+      const licenseKey = settings.license_key || '';
+      const isExpired = new Date(expiresAt).getTime() <= Date.now();
+      const status = licenseKey ? 'active' : isExpired ? 'expired' : 'trial';
+
+      db.exec({
+        sql: `INSERT OR IGNORE INTO tenants (id, name, owner_name, phone, address, plan, plan_price, status, expires_at, is_blocked, license_key, default_price)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        bind: [
+          'tenant-default',
+          settings.generator_name || 'مولدتي الأهلية',
+          'صاحب المولدة',
+          settings.owner_phone || '',
+          '',
+          licenseKey ? 'monthly' : 'trial',
+          licenseKey ? 15000 : 0,
+          status,
+          expiresAt,
+          0,
+          licenseKey,
+          Number(settings.default_ampere_price) || 12000,
+        ],
+      });
+    }
+
+    // Repair orphan rows created by older half-migrated versions and move
+    // pre-multi-tenant rows to the workspace the owner actually has selected.
+    const settings = getSettingsMap();
+    let activeTenantId = settings.active_tenant_id || 'tenant-default';
+    if (!getOneRow('SELECT id FROM tenants WHERE id = ?', [activeTenantId])) {
+      const firstTenant = getOneRow('SELECT id FROM tenants ORDER BY created_at LIMIT 1', []);
+      activeTenantId = firstTenant?.id || 'tenant-default';
+      db.exec({
+        sql: 'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)',
+        bind: ['active_tenant_id', activeTenantId],
+      });
+    }
+
+    const legacyTables: Array<[string, boolean]> = [
+      ['subscribers', subscribersHadTenant],
+      ['billing', billingHadTenant],
+      ['expenses', expensesHadTenant],
+    ];
+    for (const [table, hadTenant] of legacyTables) {
+      if (hadTenant) {
+        // The column did not exist before this upgrade, so every row is legacy
+        // data that belongs to the single active workspace.
+        db.exec({ sql: `UPDATE ${table} SET tenant_id = ?`, bind: [activeTenantId] });
+      } else {
+        db.exec({
+          sql: `UPDATE ${table} SET tenant_id = ? WHERE tenant_id IS NULL OR tenant_id = ''`,
+          bind: [activeTenantId],
+        });
+      }
+    }
+  } catch (err) {
+    console.warn('[SQLiteWorker] Tenants seeding/migration warning:', err);
+  }
+
+  db.exec({
+    sql: 'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)',
+    bind: ['db_version', '3'],
+  });
+}
+
+/**
+ * Add a column only when it is missing (idempotent, data-safe migration).
+ */
+function ensureColumn(table: string, column: string, definition: string): boolean {
+  try {
+    const columns = getAllRows(`PRAGMA table_info(${table})`, []);
+    if (!columns.some((c: any) => c.name === column)) {
+      db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition};`);
+      console.log(`[SQLiteWorker] Migrated: ${table}.${column}`);
+      return true;
+    }
+  } catch (err) {
+    console.warn(`[SQLiteWorker] Could not ensure column ${table}.${column}:`, err);
+  }
+  return false;
 }
 
 /**
@@ -173,6 +238,14 @@ function getOneRow(sql: string, params: any[] = []): any | null {
     },
   });
   return result;
+}
+
+function getSettingsMap(): Record<string, string> {
+  const map: Record<string, string> = {};
+  for (const row of getAllRows('SELECT key, value FROM settings', [])) {
+    map[row.key] = row.value;
+  }
+  return map;
 }
 
 /**
@@ -249,20 +322,35 @@ async function importDatabase(bytes: Uint8Array): Promise<boolean> {
 
     db = new sqlite3.oo1.OpfsDb(currentDbName);
   } else {
-    // In-memory import
-    const pApp = (sqlite3 as any).wasm?.alloc?.(bytes.length);
-    if (!pApp) {
-      throw new Error('فشل تخصيص الذاكرة لاستيراد قاعدة البيانات');
+    // In-memory import through SQLite's native deserialization API.
+    const capi = (sqlite3 as any).capi;
+    const wasm = (sqlite3 as any).wasm;
+    if (!capi?.sqlite3_deserialize || !wasm?.allocFromTypedArray) {
+      throw new Error('استيراد قاعدة البيانات غير مدعوم في محرك SQLite الحالي');
     }
+
     db = new sqlite3.oo1.DB(':memory:', 'c');
-    // Using capi deserialization if available or write via temp
+    const dataPtr = wasm.allocFromTypedArray(bytes);
+    const flags = capi.SQLITE_DESERIALIZE_FREEONCLOSE | capi.SQLITE_DESERIALIZE_RESIZEABLE;
+    const rc = capi.sqlite3_deserialize(db.pointer, 'main', dataPtr, bytes.byteLength, bytes.byteLength, flags);
+    if (rc !== 0) {
+      throw new Error(`فشل استيراد قاعدة البيانات (SQLite ${rc})`);
+    }
   }
+
+  // Re-apply connection pragmas after replacing the database file/handle.
+  db.exec('PRAGMA foreign_keys = ON;');
+  db.exec('PRAGMA journal_mode = WAL;');
 
   // Check integrity of newly imported DB
   const integrity = checkIntegrity();
   if (!integrity.ok) {
     throw new Error(`فشل التحقق من سلامة قاعدة البيانات المستوردة: ${integrity.details.join(', ')}`);
   }
+
+  // Bring backups created by older releases up to the current schema before
+  // the UI tries to query auth_users or tenant-scoped columns.
+  initializeSchema();
 
   return true;
 }

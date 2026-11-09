@@ -7,15 +7,25 @@
 import { db } from '../../db/database.ts';
 import type { TenantOnboardingInput } from '../../types/index.ts';
 
+export interface RegisterTenantOptions {
+  /**
+   * When opened from the Super Admin cockpit we must not silently move the
+   * shared workspace to the newly created tenant.
+   */
+  switchToTenant?: boolean;
+}
+
 export class RegisterTenantModal {
   private element: HTMLElement | null = null;
   private onSuccessCallback: (() => void) | null = null;
+  private switchToTenant = true;
 
   constructor() {}
 
-  public show(onSuccess?: () => void): void {
+  public show(onSuccess?: () => void, options?: RegisterTenantOptions): void {
     this.close();
     this.onSuccessCallback = onSuccess || null;
+    this.switchToTenant = options?.switchToTenant !== false;
 
     this.element = document.createElement('div');
     this.element.id = 'register-tenant-modal';
@@ -132,12 +142,13 @@ export class RegisterTenantModal {
         const newTenant = await db.addTenant(input);
         this.close();
 
-        const doSwitch = confirm(
-          `🎉 تم تسجيل «${newTenant.name}» بنجاح في المنظومة!\nصاحب المولدة: ${newTenant.ownerName}\nفترة التجربة: 30 يوماً مجاناً.\n\nهل ترغب بالتبديل الآن إلى لوحة إدارة هذه المولدة؟`
-        );
-
-        if (doSwitch) {
-          await db.setCurrentTenant(newTenant.id);
+        if (this.switchToTenant) {
+          const doSwitch = confirm(
+            `🎉 تم تسجيل «${newTenant.name}» بنجاح في المنظومة!\nصاحب المولدة: ${newTenant.ownerName}\nفترة التجربة: 30 يوماً مجاناً.\n\nهل ترغب بالتبديل الآن إلى لوحة إدارة هذه المولدة؟`
+          );
+          if (doSwitch) {
+            await db.setCurrentTenant(newTenant.id);
+          }
         }
 
         if (this.onSuccessCallback) {

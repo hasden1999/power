@@ -3,6 +3,7 @@
  * Field Thermal Receipt Modal for Bluetooth & Portable Printers (58mm / 80mm)
  */
 
+import { escapeHtml } from '../../utils/security.ts';
 import type { BillingRecord, AppSettings } from '../../types/index.ts';
 
 export class ThermalReceiptModal {
@@ -49,54 +50,55 @@ export class ThermalReceiptModal {
     const now = new Date();
     const dateStr = now.toLocaleDateString('ar-IQ');
     const timeStr = now.toLocaleTimeString('ar-IQ', { hour: '2-digit', minute: '2-digit' });
+    const currency = escapeHtml(settings.currency || 'د.ع');
 
     receiptContainer.innerHTML = `
       <div style="text-align: center; border-bottom: 1px dashed #000; padding-bottom: 6px; margin-bottom: 6px;">
-        <div style="font-weight: 900; font-size: 14px; margin-bottom: 2px;">${settings.generatorName}</div>
-        <div style="font-size: 11px;">هاتف: ${settings.ownerPhone || 'غير مسجل'}</div>
+        <div style="font-weight: 900; font-size: 14px; margin-bottom: 2px;">${escapeHtml(settings.generatorName)}</div>
+        <div style="font-size: 11px;">هاتف: ${escapeHtml(settings.ownerPhone || 'غير مسجل')}</div>
         <div style="font-size: 10px; margin-top: 2px;">وصل قبض اشتراك شهري</div>
       </div>
 
       <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
-        <span>التاريخ: ${dateStr}</span>
-        <span>${timeStr}</span>
+        <span>التاريخ: ${escapeHtml(dateStr)}</span>
+        <span>${escapeHtml(timeStr)}</span>
       </div>
       <div style="margin-bottom: 6px; font-size: 10px; color: #555;">
-        رقم السند: #${bill.id.slice(0, 8).toUpperCase()}
+        رقم السند: #${escapeHtml(bill.id.slice(0, 8).toUpperCase())}
       </div>
 
       <div style="border-top: 1px dashed #000; border-bottom: 1px dashed #000; padding: 6px 0; margin-bottom: 6px;">
         <div style="display: flex; justify-content: space-between; margin-bottom: 3px;">
           <strong>المشترك:</strong>
-          <span>${bill.subscriberName || 'غير معروف'}</span>
+          <span>${escapeHtml(bill.subscriberName || 'غير معروف')}</span>
         </div>
         <div style="display: flex; justify-content: space-between; margin-bottom: 3px;">
           <span>الأمبيرية:</span>
-          <span>${bill.amperes || 0} أمبير</span>
+          <span>${escapeHtml(bill.amperes || 0)} أمبير</span>
         </div>
         <div style="display: flex; justify-content: space-between; margin-bottom: 3px;">
           <span>عن شهر:</span>
-          <span>${bill.month} / ${bill.year}</span>
+          <span>${escapeHtml(bill.month)} / ${escapeHtml(bill.year)}</span>
         </div>
         <div style="display: flex; justify-content: space-between; margin-bottom: 3px;">
           <span>سعر الأمبير:</span>
-          <span>${bill.pricePerAmpere.toLocaleString('ar-IQ')} ${settings.currency}</span>
+          <span>${bill.pricePerAmpere.toLocaleString('ar-IQ')} ${currency}</span>
         </div>
         <div style="display: flex; justify-content: space-between; margin-top: 4px; padding-top: 4px; border-top: 1px dotted #ccc;">
           <strong>المبلغ المستحق:</strong>
-          <strong>${bill.totalDue.toLocaleString('ar-IQ')} ${settings.currency}</strong>
+          <strong>${bill.totalDue.toLocaleString('ar-IQ')} ${currency}</strong>
         </div>
         <div style="display: flex; justify-content: space-between; color: #047857; margin-top: 2px;">
           <strong>المدفوع نقداً:</strong>
-          <strong>${bill.totalPaid.toLocaleString('ar-IQ')} ${settings.currency}</strong>
+          <strong>${bill.totalPaid.toLocaleString('ar-IQ')} ${currency}</strong>
         </div>
         <div style="display: flex; justify-content: space-between; color: ${bill.remaining > 0 ? '#b91c1c' : '#000'}; margin-top: 2px;">
           <strong>المتبقي (دين):</strong>
-          <strong>${bill.remaining.toLocaleString('ar-IQ')} ${settings.currency}</strong>
+          <strong>${bill.remaining.toLocaleString('ar-IQ')} ${currency}</strong>
         </div>
       </div>
 
-      ${bill.notes ? `<div style="font-size: 10px; margin-bottom: 6px;">ملاحظات: ${bill.notes}</div>` : ''}
+      ${bill.notes ? `<div style="font-size: 10px; margin-bottom: 6px;">ملاحظات: ${escapeHtml(bill.notes)}</div>` : ''}
 
       <div style="text-align: center; font-size: 10px; margin-top: 6px; border-top: 1px dashed #000; padding-top: 6px;">
         شكراً لالتزامكم بالتسديد في الموعد المحدد ⚡<br>

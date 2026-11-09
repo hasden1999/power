@@ -5,6 +5,7 @@
  */
 
 import { db } from '../db/database.ts';
+import { csvCell } from '../utils/security.ts';
 import type { Subscriber, BillingRecord } from '../types/index.ts';
 
 export interface BackupSnapshot {
@@ -57,8 +58,7 @@ export class BackupManager {
         // Prune older snapshots if exceeding MAX_OPFS_SNAPSHOTS
         await this.pruneOldSnapshots(backupDir);
 
-        const nowIso = now.toISOString();
-        await db.updateSettings({ lastBackup: nowIso });
+        await db.markInternalBackup();
 
         console.log(`[BackupManager] OPFS Snapshot created: ${filename} (${triggerReason})`);
         return filename;
@@ -142,6 +142,7 @@ export class BackupManager {
           text: `نسخة احتياطية لقاعدة بيانات منظومة أمبيرجي بتاريخ ${formattedDate}`,
           files: [file],
         });
+        await this.recordExternalExport();
         return;
       } catch (err: any) {
         if (err.name !== 'AbortError') {
@@ -160,7 +161,17 @@ export class BackupManager {
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
+    await this.recordExternalExport();
     setTimeout(() => URL.revokeObjectURL(url), 5000);
+  }
+
+  /** Record a user-facing export without touching the mutation counter. */
+  private async recordExternalExport(): Promise<void> {
+    try {
+      await db.markExternalExport();
+    } catch (err) {
+      console.warn('[BackupManager] Could not record external export:', err);
+    }
   }
 
   /**
@@ -204,22 +215,27 @@ export class BackupManager {
    */
   public async exportSubscribersToCsv(subscribers: Subscriber[]): Promise<void> {
     const headers = ['المعرف', 'الاسم الكامل', 'الهاتف', 'المنطقة', 'المحلة', 'الزقاق', 'رقم الدار', 'الأمبيرات', 'نوع الخط', 'حالة الخط', 'ملاحظات', 'تاريخ التسجيل'];
-    const rows = subscribers.map((s) => [
-      `"${s.id}"`,
-      `"${s.fullName.replace(/"/g, '""')}"`,
-      `"${s.phone}"`,
-      `"${s.area.replace(/"/g, '""')}"`,
-      `"${s.neighborhood}"`,
-      `"${s.alley}"`,
-      `"${s.houseNumber}"`,
-      s.amperes,
-      `"${s.lineType}"`,
-      `"${s.lineStatus}"`,
-      `"${(s.notes || '').replace(/"/g, '""')}"`,
-      `"${s.createdAt}"`,
-    ]);
+    const rows = subscribers.map((s) =>
+      [
+        s.id,
+        s.fullName,
+        s.phone,
+        s.area,
+        s.neighborhood,
+        s.alley,
+        s.houseNumber,
+        s.amperes,
+        s.lineType,
+        s.lineStatus,
+        s.notes || '',
+        s.createdAt,
+      ]
+        .map(csvCell)
+        .join(',')
+    );
 
-    const csvContent = '\uFEFF' + [headers.join(','), ...rows.map((r) => r.join(','))].join('\r\n');
+    const csvContent =
+      '\uFEFF' + [headers.map(csvCell).join(','), ...rows].join('\r\n');
     this.downloadCsvFile(csvContent, 'ampereji_subscribers.csv');
   }
 
@@ -228,22 +244,27 @@ export class BackupManager {
    */
   public async exportBillingToCsv(bills: BillingRecord[]): Promise<void> {
     const headers = ['المعرف', 'اسم المشترك', 'الهاتف', 'الشهر', 'السنة', 'سعر الأمبير', 'المستحق', 'المسدد', 'المتبقي', 'الحالة', 'تاريخ الدفع', 'ملاحظات'];
-    const rows = bills.map((b) => [
-      `"${b.id}"`,
-      `"${(b.subscriberName || '').replace(/"/g, '""')}"`,
-      `"${b.phone || ''}"`,
-      b.month,
-      b.year,
-      b.pricePerAmpere,
-      b.totalDue,
-      b.totalPaid,
-      b.remaining,
-      `"${b.status}"`,
-      `"${b.paymentDate || ''}"`,
-      `"${(b.notes || '').replace(/"/g, '""')}"`,
-    ]);
+    const rows = bills.map((b) =>
+      [
+        b.id,
+        b.subscriberName || '',
+        b.phone || '',
+        b.month,
+        b.year,
+        b.pricePerAmpere,
+        b.totalDue,
+        b.totalPaid,
+        b.remaining,
+        b.status,
+        b.paymentDate || '',
+        b.notes || '',
+      ]
+        .map(csvCell)
+        .join(',')
+    );
 
-    const csvContent = '\uFEFF' + [headers.join(','), ...rows.map((r) => r.join(','))].join('\r\n');
+    const csvContent =
+      '\uFEFF' + [headers.map(csvCell).join(','), ...rows].join('\r\n');
     this.downloadCsvFile(csvContent, 'ampereji_billing.csv');
   }
 

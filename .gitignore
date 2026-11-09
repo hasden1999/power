@@ -26,6 +26,9 @@ dist-ssr
 *.sln
 *.sw?
 
+# Offline license signing key (NEVER commit)
+tools/license-keys.json
+
 # Agent review and scratch
 .agents/
 .review/
