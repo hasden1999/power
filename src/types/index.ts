@@ -9,7 +9,7 @@ export type LineStatus = 'نشط' | 'مقطوع' | 'معلق';
 export type BillStatus = 'واصل' | 'متبقي' | 'غير مسدد';
 export type ExpenseType = 'وقود' | 'زيت_وفلاتر' | 'صيانة' | 'أجور' | 'إيجار' | 'نثريات';
 
-export type TenantPlan = 'trial' | 'monthly' | 'yearly';
+export type TenantPlan = 'trial' | 'monthly' | 'yearly' | 'lifetime';
 export type TenantStatus = 'active' | 'trial' | 'expired' | 'blocked' | 'pending';
 export type AuthRole = 'super_admin' | 'tenant_owner';
 

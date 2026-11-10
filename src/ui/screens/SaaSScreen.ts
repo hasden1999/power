@@ -33,6 +33,7 @@ const PLAN_LABELS: Record<TenantPlan, string> = {
   trial: 'فترة تجريبية',
   monthly: 'اشتراك شهري',
   yearly: 'اشتراك سنوي',
+  lifetime: 'ترخيص دائمي (مدى الحياة)',
 };
 
 const TENANT_FILTERS: Array<{ id: string; label: string }> = [
@@ -1288,6 +1289,22 @@ export class SaaSScreen {
       }
     });
 
+    const lifetimeBtn = this.makeButton(
+      '👑 تفعيل دائمي',
+      'bg-amber-600 hover:bg-amber-500 text-slate-950 font-black shadow'
+    );
+    lifetimeBtn.classList.add('justify-center');
+    lifetimeBtn.title = 'تفعيل المنظومة بترخيص دائمي مدى الحياة (بدون تجديد سنوي)';
+    lifetimeBtn.addEventListener('click', async () => {
+      if (!confirm(`تفعيل ترخيص دائمي (مدى الحياة) لمولدة «${tenant.name}»؟`)) return;
+      try {
+        await db.activateOrExtendTenant(tenant.id, 36500, 'yearly');
+        await this.loadData();
+      } catch (err) {
+        alert(`تعذر تفعيل الترخيص: ${errorMessage(err)}`);
+      }
+    });
+
     const licenseBtn = this.makeButton(
       '🔑 تطبيق كود ترخيص',
       'bg-[#0E7490] hover:bg-cyan-600 text-white shadow'
@@ -1296,8 +1313,10 @@ export class SaaSScreen {
     licenseBtn.title = 'لصق كود ترخيص موقّع تم إصداره عبر أداة المنصة';
     licenseBtn.addEventListener('click', () => this.openLicenseImportModal(tenant));
 
-    primaryActions.appendChild(monthlyBtn);
+    primaryActions.className = 'grid grid-cols-2 sm:grid-cols-4 gap-2';
     primaryActions.appendChild(yearlyBtn);
+    primaryActions.appendChild(lifetimeBtn);
+    primaryActions.appendChild(monthlyBtn);
     primaryActions.appendChild(licenseBtn);
     actionsContainer.appendChild(primaryActions);
 
@@ -1422,10 +1441,13 @@ export class SaaSScreen {
         <button type="button" id="close-license-modal" class="text-slate-400 hover:text-white p-1 text-xl leading-none cursor-pointer">&times;</button>
       </div>
 
-      <div class="p-3 rounded-xl bg-slate-800/60 border border-slate-700 text-[11px] text-slate-300 leading-relaxed">
-        أصدر الكود من أداة المنصة على جهازك:
-        <code class="block mt-1 font-mono text-[10px] text-cyan-300 break-all" dir="ltr">node tools/generate-license.js issue --name "اسم المولدة" --phone "07XXXXXXXXX" --type yearly</code>
-        المفتاح الخاص لا يُضمَّن في التطبيق ولا يُرسل إلى المتصفح.
+      <div class="p-3 rounded-xl bg-slate-800/60 border border-slate-700 text-[11px] text-slate-300 leading-relaxed space-y-1">
+        <div>أصدر الكود من أداة المنصة على جهازك:</div>
+        <div class="space-y-1 mt-1 font-mono text-[10px] break-all" dir="ltr">
+          <div class="text-cyan-300 bg-slate-900/80 p-1.5 rounded-lg border border-slate-700">node tools/generate-license.js issue --name "${escapeHtml(tenant.name)}" --phone "${escapeHtml(tenant.phone)}" --type yearly</div>
+          <div class="text-amber-300 bg-slate-900/80 p-1.5 rounded-lg border border-slate-700">node tools/generate-license.js issue --name "${escapeHtml(tenant.name)}" --phone "${escapeHtml(tenant.phone)}" --type lifetime</div>
+        </div>
+        <div class="text-[10px] text-slate-400">المفتاح الخاص لا يُضمَّن في التطبيق ولا يُرسل إلى المتصفح.</div>
       </div>
 
       <div>

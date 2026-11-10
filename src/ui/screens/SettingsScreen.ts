@@ -10,6 +10,7 @@ import { licenseManager } from '../../license/license.ts';
 import { backupManager, type BackupSnapshot } from '../../backup/backup.ts';
 import { getEntitlement, type Entitlement } from '../../services/entitlementService.ts';
 import { authService } from '../../services/authService.ts';
+import { APP_CONFIG } from '../../config/app-config.ts';
 import { escapeHtml } from '../../utils/security.ts';
 import type { AppSettings, LicenseStatus, Tenant, TenantPlan, TenantStatus } from '../../types/index.ts';
 
@@ -17,6 +18,7 @@ const PLAN_LABELS: Record<TenantPlan, string> = {
   trial: 'فترة تجريبية',
   monthly: 'اشتراك شهري',
   yearly: 'اشتراك سنوي',
+  lifetime: 'ترخيص دائمي (مدى الحياة)',
 };
 
 const STATUS_LABELS: Record<TenantStatus, string> = {
@@ -79,18 +81,23 @@ export class SettingsScreen {
     const daysLeft = status.trialDaysRemaining;
     const expiryDate = status.licenseExpiryDate;
 
+    const isLifetime =
+      (source === 'license' && !expiryDate) ||
+      (tenant && new Date(tenant.expiresAt).getFullYear() > 2090) ||
+      (tenant?.plan === 'lifetime');
+
     const sourceMeta =
       source === 'license'
         ? {
-            title: '🛡️ رخصة المنظومة: مفعّلة بكود موقّع',
-            badge: 'نسخة مرخصة بالكامل',
+            title: isLifetime ? '👑 رخصة المنظومة: تفعيل دائمي (مدى الحياة)' : '🛡️ رخصة المنظومة: اشتراك سنوي مفعّل',
+            badge: isLifetime ? 'نسخة دائمية مرخصة' : 'اشتراك سنوي ساري',
             badgeClass: 'bg-emerald-950 text-emerald-300 border border-emerald-700/60',
             tone: 'text-emerald-400',
           }
         : source === 'subscription'
           ? {
-              title: '✅ اشتراك المنصة: ساري',
-              badge: daysLeft > 0 ? `متبقي ${daysLeft} يوماً` : 'ساري',
+              title: isLifetime ? '👑 اشتراك المنصة: ترخيص دائمي' : '✅ اشتراك المنصة: ساري (سنوي)',
+              badge: isLifetime ? 'دائمي' : daysLeft > 0 ? `متبقي ${daysLeft} يوماً` : 'ساري',
               badgeClass: 'bg-emerald-950 text-emerald-300 border border-emerald-700/60',
               tone: 'text-emerald-400',
             }
@@ -112,7 +119,7 @@ export class SettingsScreen {
                   tone: 'text-rose-400',
                 }
               : {
-                  title: '⌛ رخصة المنظومة: منتهية',
+                  title: '⌛ رخصة المنظومة: منتهية الصلاحية',
                   badge: 'انتهى الاشتراك',
                   badgeClass: 'bg-rose-950 text-rose-300 border border-rose-700/60',
                   tone: 'text-rose-400',
@@ -120,14 +127,18 @@ export class SettingsScreen {
 
     const description =
       source === 'license'
-        ? `المنظومة مرخصة بكود موقّع رقمياً لصالح <strong>${escapeHtml(status.generatorName || settings.generatorName)}</strong>. تعمل أوفلاين 100% بدون أي خوادم خارجية.`
+        ? (isLifetime
+            ? `المنظومة مرخصة بـ <strong>ترخيص دائمي (مدى الحياة)</strong> لصالح <strong>${escapeHtml(status.generatorName || settings.generatorName)}</strong> بدون أي رسوم تجديد دورية. تعمل أوفلاين 100%.`
+            : `المنظومة مفعّلة بـ <strong>اشتراك سنوي</strong> ساري حتى <strong>${escapeHtml(this.formatDate(expiryDate))}</strong> لصالح <strong>${escapeHtml(status.generatorName || settings.generatorName)}</strong>. تعمل أوفلاين 100%.`)
         : source === 'subscription'
-          ? `اشتراك هذه المولدة ساري حتى <strong>${escapeHtml(this.formatDate(expiryDate))}</strong>. يمكنك إضافة المشتركين وإصدار القوائم وتسجيل المصاريف بشكل طبيعي.`
+          ? (isLifetime
+              ? `اشتراك هذه المولدة <strong>دائمي مدى الحياة</strong> في المنظومة.`
+              : `اشتراك هذه المولدة ساري حتى <strong>${escapeHtml(this.formatDate(expiryDate))}</strong>. يمكنك إضافة المشتركين وإصدار القوائم وتسجيل المصاريف بشكل طبيعي.`)
           : source === 'trial'
-            ? `أنت في فترة التجربة المجانية بكامل المزايا. عند انتهاء الفترة يمكنك الاستعراض والطباعة والتصدير، لكن إضافة سجلات جديدة تتوقف حتى إدخال كود ترخيص أو تجديد الاشتراك من إدارة المنصة.`
+            ? `أنت في فترة التجربة المجانية بكامل المزايا. عند انتهاء الفترة يمكنك الاستعراض والطباعة والتصدير، لكن إضافة سجلات جديدة تتوقف حتى إدخال كود ترخيص أو تجديد الاشتراك (سنوي أو دائمي).`
             : source === 'blocked'
               ? 'تم إيقاف حساب هذه المولدة من قبل إدارة المنصة. جميع بياناتك محفوظة ويمكنك استعراضها وتصديرها، لكن إضافة سجلات جديدة غير متاحة حتى يُعاد التفعيل.'
-              : 'انتهى اشتراك هذه المولدة. جميع بياناتك محفوظة ويمكنك استعراضها وطباعتها وتصديرها، لكن إضافة سجلات جديدة متوقفة حتى إدخال كود ترخيص ساري أو تجديد الاشتراك.';
+              : 'انتهى اشتراك هذه المولدة. جميع بياناتك محفوظة ويمكنك استعراضها وطباعتها وتصديرها، لكن إضافة سجلات جديدة متوقفة حتى إدخال كود ترخيص (سنوي أو دائمي).';
 
     const tenantInfo = tenant
       ? `
@@ -138,19 +149,31 @@ export class SettingsScreen {
           </div>
           <div class="p-3 rounded-xl bg-slate-800/60 border border-slate-700/60">
             <span class="text-slate-400 block text-[10px]">الخطة / الحالة</span>
-            <span class="font-bold ${sourceMeta.tone}">${escapeHtml(PLAN_LABELS[tenant.plan] || tenant.plan)} • ${escapeHtml(STATUS_LABELS[tenant.status] || tenant.status)}</span>
+            <span class="font-bold ${sourceMeta.tone}">${escapeHtml(isLifetime ? 'ترخيص دائمي' : (PLAN_LABELS[tenant.plan] || tenant.plan))} • ${escapeHtml(STATUS_LABELS[tenant.status] || tenant.status)}</span>
           </div>
           <div class="p-3 rounded-xl bg-slate-800/60 border border-slate-700/60">
             <span class="text-slate-400 block text-[10px]">تاريخ انتهاء الاشتراك</span>
-            <span class="font-bold text-slate-200">${escapeHtml(this.formatDate(tenant.expiresAt))}</span>
+            <span class="font-bold text-slate-200">${escapeHtml(isLifetime ? 'مدى الحياة (دائم)' : this.formatDate(tenant.expiresAt))}</span>
           </div>
           <div class="p-3 rounded-xl bg-slate-800/60 border border-slate-700/60">
             <span class="text-slate-400 block text-[10px]">المتبقي</span>
-            <span class="font-bold ${sourceMeta.tone}">${escapeHtml(this.remainingLabel(tenant.expiresAt))}</span>
+            <span class="font-bold ${sourceMeta.tone}">${escapeHtml(isLifetime ? 'ساري دائماً ♾️' : this.remainingLabel(tenant.expiresAt))}</span>
           </div>
         </div>
       `
       : '';
+
+    const genName = tenant?.name || settings.generatorName || 'مولدتي الأهلية';
+    const ownerName = tenant?.ownerName || 'صاحب المولدة';
+    const ownerPhone = tenant?.phone || settings.ownerPhone || '';
+    const waText = `السلام عليكم ورحمة الله،
+أود تفعيل / تجديد ترخيص منظومة أمبيرجي لإدارة المولدات:
+• اسم المولدة: ${genName}
+• صاحب المولدة: ${ownerName}
+${ownerPhone ? `• رقم الهاتف: ${ownerPhone}\n` : ''}• نوع التفعيل المطلوب: (سنوي / دائمي)`;
+
+    const whatsappUrl = `https://wa.me/${APP_CONFIG.support.whatsapp}?text=${encodeURIComponent(waText)}`;
+    const phoneUrl = `tel:${APP_CONFIG.support.phone}`;
 
     licCard.innerHTML = `
       <div class="flex items-center justify-between gap-2 flex-wrap">
@@ -162,6 +185,35 @@ export class SettingsScreen {
 
       <p class="text-slate-300 leading-relaxed">${description}</p>
       ${tenantInfo}
+
+      <!-- Contact Support & WhatsApp Renewal Card -->
+      <div class="p-3.5 rounded-2xl bg-gradient-to-r from-cyan-950/70 to-slate-800/90 border border-cyan-800/70 space-y-2.5">
+        <div class="flex items-center justify-between gap-2 flex-wrap">
+          <div class="flex items-center gap-2">
+            <span class="text-xl">⚡</span>
+            <div>
+              <span class="font-bold text-white block text-xs">طلب كود تفعيل المنظومة (سنوي أو دائمي)</span>
+              <span class="text-[11px] text-slate-300">للحصول على كود ترخيص أو التجديد، تواصل مع صاحب ومطور التطبيق:</span>
+            </div>
+          </div>
+          <span class="text-[11px] font-mono text-cyan-300 font-bold bg-slate-900/90 px-2.5 py-1 rounded-lg border border-slate-700">
+            ${escapeHtml(APP_CONFIG.support.phone)}
+          </span>
+        </div>
+
+        <div class="flex flex-col sm:flex-row gap-2 pt-1">
+          <a href="${whatsappUrl}" target="_blank" rel="noopener noreferrer"
+            class="flex-1 min-h-[44px] px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md transition active:scale-95 flex items-center justify-center gap-1.5 no-underline cursor-pointer">
+            <span class="text-base">💬</span>
+            <span>مراسلة واتساب (رسالة تفعيل جاهزة)</span>
+          </a>
+          <a href="${phoneUrl}"
+            class="min-h-[44px] px-4 py-2 rounded-xl bg-blue-700 hover:bg-blue-600 text-white font-bold text-xs shadow-md transition active:scale-95 flex items-center justify-center gap-1.5 no-underline cursor-pointer">
+            <span class="text-base">📞</span>
+            <span>اتصال مباشر (${escapeHtml(APP_CONFIG.support.phone)})</span>
+          </a>
+        </div>
+      </div>
 
       <div class="space-y-2 pt-3 border-t border-slate-800">
         <label class="block text-slate-400 font-bold">تفعيل أو استبدال كود الترخيص الرقمي:</label>

@@ -6,6 +6,7 @@
 
 import { db } from '../../db/database.ts';
 import { getEntitlement, entitlementLockMessage } from '../../services/entitlementService.ts';
+import { licenseLockModal } from '../components/LicenseLockModal.ts';
 import { escapeHtml } from '../../utils/security.ts';
 import type { Expense, ExpenseType, AppSettings } from '../../types/index.ts';
 
@@ -30,6 +31,31 @@ export class ExpensesScreen {
 
     const root = document.createElement('div');
     root.className = 'space-y-4';
+
+    // 0. License lock banner if subscription is expired/blocked
+    const entitlement = await getEntitlement();
+    if (!entitlement.status.canAddRecords) {
+      const lockBanner = document.createElement('div');
+      lockBanner.className =
+        'p-3.5 rounded-2xl bg-gradient-to-r from-rose-950/80 to-slate-900 border border-rose-800/80 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs shadow-lg';
+      lockBanner.innerHTML = `
+        <div class="flex items-center gap-2.5">
+          <span class="text-xl">🔒</span>
+          <div>
+            <div class="font-bold text-rose-300">انتهت صلاحية استخدام المنظومة</div>
+            <div class="text-[11px] text-slate-300">تسجيل مصاريف ووقود جديد متوقف حتى تفعيل المنظومة (سنوي أو دائمي). السجلات السابقة محفوظة.</div>
+          </div>
+        </div>
+        <button type="button" id="expenses-renew-btn"
+          class="min-h-[40px] px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow transition active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer shrink-0">
+          <span>💬 تفعيل (واتساب / اتصال)</span>
+        </button>
+      `;
+      lockBanner.querySelector('#expenses-renew-btn')?.addEventListener('click', () => {
+        licenseLockModal.show({ entitlement, actionName: 'تسجيل المصاريف والوقود' });
+      });
+      root.appendChild(lockBanner);
+    }
 
     // 1. Header & Actions
     const header = document.createElement('div');
@@ -247,7 +273,7 @@ export class ExpensesScreen {
   private async openExpenseModal(): Promise<void> {
     const entitlement = await getEntitlement();
     if (!entitlement.status.canAddRecords) {
-      alert(entitlementLockMessage(entitlement));
+      licenseLockModal.show({ entitlement, actionName: 'تسجيل مصروف جديد' });
       return;
     }
 
